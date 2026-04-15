@@ -40,15 +40,18 @@ targets:
         PRODUCT_NAME: Controllarr
         PRODUCT_BUNDLE_IDENTIFIER: com.controllarr.Controllarr
         MACOSX_DEPLOYMENT_TARGET: "15.0"
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_LSUIElement: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Controllarr
-        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Everett Jenkins. MIT Licensed."
-        INFOPLIST_KEY_LSMinimumSystemVersion: "15.0"
-        # Silence the background-tasks warning since we don't use them yet.
-        INFOPLIST_KEY_NSSupportsAutomaticTermination: NO
-        INFOPLIST_KEY_NSSupportsSuddenTermination: NO
         CODE_SIGN_ENTITLEMENTS: App/Controllarr.entitlements
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleIconFile: AppIcon
+        CFBundleIconName: AppIcon
+        LSUIElement: YES
+        CFBundleDisplayName: Controllarr
+        NSHumanReadableCopyright: "Copyright © 2026 Everett Jenkins. MIT Licensed."
+        LSMinimumSystemVersion: "15.0"
+        NSSupportsAutomaticTermination: NO
+        NSSupportsSuddenTermination: NO
     dependencies:
       - package: Controllarr
         product: ControllarrCore
