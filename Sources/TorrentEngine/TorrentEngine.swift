@@ -62,6 +62,26 @@ public struct SessionStats: Sendable, Codable {
     public let numPeersConnected: Int
     public let hasIncomingConnections: Bool
     public let listenPort: UInt16
+
+    public init(
+        downloadRate: Int64,
+        uploadRate: Int64,
+        totalDownloaded: Int64,
+        totalUploaded: Int64,
+        numTorrents: Int,
+        numPeersConnected: Int,
+        hasIncomingConnections: Bool,
+        listenPort: UInt16
+    ) {
+        self.downloadRate = downloadRate
+        self.uploadRate = uploadRate
+        self.totalDownloaded = totalDownloaded
+        self.totalUploaded = totalUploaded
+        self.numTorrents = numTorrents
+        self.numPeersConnected = numPeersConnected
+        self.hasIncomingConnections = hasIncomingConnections
+        self.listenPort = listenPort
+    }
 }
 
 public enum TorrentEngineError: Error, LocalizedError {
@@ -95,6 +115,15 @@ public actor TorrentEngine {
     private let resumeDir: URL
     private var categoryByHash: [String: String] = [:]
     private let resolver: CategoryResolver
+
+    /// True once Controllarr has applied dangerous-file filtering to a
+    /// given info hash. Keyed on info hash. Set lazily on the first
+    /// pollStats tick where the torrent's metadata is available.
+    private var fileFilterApplied: Set<String> = []
+    /// Blocked extensions, lowercased without the dot, keyed by category
+    /// name. Populated from Persistence at add-time so the engine can
+    /// apply priorities without needing another async round-trip.
+    private var blockedExtensionsByCategory: [String: [String]] = [:]
 
     public init(
         defaultSavePath: URL,
@@ -180,6 +209,68 @@ public actor TorrentEngine {
     public func setCategory(_ category: String?, for infoHash: String) {
         if let category { categoryByHash[infoHash] = category }
         else { categoryByHash.removeValue(forKey: infoHash) }
+    }
+
+    /// Record a category's blocked extension list so the engine can
+    /// apply libtorrent file priorities when metadata arrives.
+    public func registerBlockedExtensions(_ extensions: [String], forCategory category: String) {
+        let cleaned = extensions.map { ext -> String in
+            var e = ext.lowercased()
+            if e.hasPrefix(".") { e.removeFirst() }
+            return e
+        }.filter { !$0.isEmpty }
+        if cleaned.isEmpty {
+            blockedExtensionsByCategory.removeValue(forKey: category)
+        } else {
+            blockedExtensionsByCategory[category] = cleaned
+        }
+    }
+
+    /// List the files in a torrent, or nil if metadata isn't available yet.
+    public func fileNames(for infoHash: String) -> [String]? {
+        session.fileNames(forInfoHash: infoHash)
+    }
+
+    /// Apply per-file download priorities directly. 0 = skip, 4 = normal.
+    @discardableResult
+    public func setFilePriorities(_ priorities: [Int], for infoHash: String) -> Bool {
+        session.setFilePriorities(priorities.map { NSNumber(value: $0) }, forInfoHash: infoHash)
+    }
+
+    /// Ask libtorrent to immediately re-announce a single torrent.
+    @discardableResult
+    public func reannounce(infoHash: String) -> Bool {
+        session.reannounceTorrent(infoHash)
+    }
+
+    /// Walk current torrents and, for any whose metadata has arrived and
+    /// whose category has blocked extensions, apply file priorities to
+    /// skip the blocked files. Idempotent — each hash is only processed
+    /// once. Called on every poll tick by the runtime.
+    public func applyPendingFileFilters() {
+        for torrent in session.pollStats() {
+            let hash = torrent.infoHash
+            if fileFilterApplied.contains(hash) { continue }
+            guard let category = categoryByHash[hash],
+                  let blocked = blockedExtensionsByCategory[category],
+                  !blocked.isEmpty else {
+                // Nothing to filter, but mark applied so we don't retry.
+                if categoryByHash[hash] == nil || blockedExtensionsByCategory[categoryByHash[hash] ?? ""] == nil {
+                    fileFilterApplied.insert(hash)
+                }
+                continue
+            }
+            guard let files = session.fileNames(forInfoHash: hash) else {
+                // Metadata not yet available — try again next tick.
+                continue
+            }
+            let priorities: [NSNumber] = files.map { file -> NSNumber in
+                let ext = (file as NSString).pathExtension.lowercased()
+                return blocked.contains(ext) ? NSNumber(value: 0) : NSNumber(value: 4)
+            }
+            _ = session.setFilePriorities(priorities, forInfoHash: hash)
+            fileFilterApplied.insert(hash)
+        }
     }
 
     // MARK: Reading

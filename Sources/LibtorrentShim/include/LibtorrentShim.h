@@ -100,6 +100,24 @@ typedef NS_ENUM(NSInteger, CTRLTorrentState) {
 - (nullable CTRLTorrentStats *)statsForInfoHash:(NSString *)infoHash;
 - (CTRLSessionStats *)sessionStats;
 
+/// Return the file list of a torrent, one entry per file, as a path
+/// relative to the torrent save path. Returns nil if the torrent's
+/// metadata is not yet available (magnet link still fetching) or if
+/// the info hash is unknown.
+- (nullable NSArray<NSString *> *)fileNamesForInfoHash:(NSString *)infoHash;
+
+/// Apply per-file download priorities. `priorities` must be one entry
+/// per file, in the same order as -fileNamesForInfoHash:. Values follow
+/// libtorrent's convention — 0 = don't download, 1 = normal, 4 = normal,
+/// 7 = highest. Returns NO if the torrent is unknown or still has no
+/// metadata.
+- (BOOL)setFilePriorities:(NSArray<NSNumber *> *)priorities
+              forInfoHash:(NSString *)infoHash;
+
+/// Ask the tracker swarm for an immediate re-announce on one torrent.
+/// Used by the health watcher when flagging a stall.
+- (BOOL)reannounceTorrent:(NSString *)infoHash;
+
 // MARK: Listen port control (the #1 feature)
 
 /// Change the listen port at runtime. Updates libtorrent's

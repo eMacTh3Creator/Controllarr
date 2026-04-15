@@ -18,6 +18,7 @@ import Hummingbird
 import NIOCore
 import TorrentEngine
 import Persistence
+import Services
 
 public enum QBittorrentAPI {
 
@@ -263,9 +264,31 @@ public enum QBittorrentAPI {
                 return Response(status: .badRequest)
             }
             let save = form["savePath"] ?? ""
-            await services.store.upsertCategory(
-                Category(name: name, savePath: save)
-            )
+            // Preserve any existing Controllarr-specific fields if the
+            // category already exists (Sonarr/Radarr will call this to
+            // "make sure" a category exists before adding).
+            if let existing = await services.store.category(named: name) {
+                var updated = existing
+                if !save.isEmpty { updated.savePath = save }
+                await services.store.upsertCategory(updated)
+            } else {
+                await services.store.upsertCategory(
+                    Category(name: name, savePath: save)
+                )
+            }
+            return plainText("")
+        }
+        router.post("/api/v2/torrents/editCategory") { request, _ -> Response in
+            let form = FormParser.parse(try await request.body.collect(upTo: 64 * 1024))
+            guard let name = form["category"], !name.isEmpty else {
+                return Response(status: .badRequest)
+            }
+            let save = form["savePath"] ?? ""
+            if let existing = await services.store.category(named: name) {
+                var updated = existing
+                updated.savePath = save
+                await services.store.upsertCategory(updated)
+            }
             return plainText("")
         }
         router.post("/api/v2/torrents/removeCategories") { request, _ -> Response in
@@ -305,6 +328,202 @@ public enum QBittorrentAPI {
         router.post("/api/controllarr/port/cycle") { _, _ -> Response in
             await services.forceCyclePort()
             return plainText("cycling")
+        }
+
+        // MARK: Controllarr: categories (extended schema)
+
+        router.get("/api/controllarr/categories") { _, _ -> Response in
+            let cats = await services.store.categories()
+            return json(cats.map(categoryDict))
+        }
+        router.post("/api/controllarr/categories") { request, _ -> Response in
+            let body = try await request.body.collect(upTo: 64 * 1024)
+            guard let dict = try? JSONSerialization.jsonObject(with: Data(buffer: body))
+                    as? [String: Any],
+                  let name = dict["name"] as? String, !name.isEmpty,
+                  let save = dict["savePath"] as? String
+            else { return Response(status: .badRequest) }
+
+            let category = Category(
+                name: name,
+                savePath: save,
+                completePath: (dict["completePath"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                extractArchives: (dict["extractArchives"] as? Bool) ?? false,
+                blockedExtensions: (dict["blockedExtensions"] as? [String]) ?? [],
+                maxRatio: dict["maxRatio"] as? Double,
+                maxSeedingTimeMinutes: dict["maxSeedingTimeMinutes"] as? Int
+            )
+            await services.store.upsertCategory(category)
+            await services.engine.registerBlockedExtensions(
+                category.blockedExtensions,
+                forCategory: category.name
+            )
+            return json(categoryDict(category))
+        }
+        router.delete("/api/controllarr/categories/:name") { request, context -> Response in
+            guard let name = context.parameters.get("name") else {
+                return Response(status: .badRequest)
+            }
+            await services.store.removeCategory(named: name)
+            return plainText("")
+        }
+
+        // MARK: Controllarr: settings (full schema)
+
+        router.get("/api/controllarr/settings") { _, _ -> Response in
+            let s = await services.store.settings()
+            return json(settingsDict(s))
+        }
+        router.post("/api/controllarr/settings") { request, _ -> Response in
+            let body = try await request.body.collect(upTo: 64 * 1024)
+            guard let dict = try? JSONSerialization.jsonObject(with: Data(buffer: body))
+                    as? [String: Any] else {
+                return Response(status: .badRequest)
+            }
+            await services.store.updateSettings { s in
+                if let v = dict["listenPortRangeStart"] as? Int { s.listenPortRangeStart = UInt16(v) }
+                if let v = dict["listenPortRangeEnd"]   as? Int { s.listenPortRangeEnd   = UInt16(v) }
+                if let v = dict["stallThresholdMinutes"] as? Int { s.stallThresholdMinutes = v }
+                if let v = dict["defaultSavePath"]   as? String { s.defaultSavePath = v }
+                if let v = dict["webUIHost"]         as? String { s.webUIHost = v }
+                if let v = dict["webUIPort"]         as? Int    { s.webUIPort = v }
+                if let v = dict["webUIUsername"]     as? String { s.webUIUsername = v }
+                if let v = dict["webUIPassword"]     as? String, !v.isEmpty { s.webUIPassword = v }
+                if dict.keys.contains("globalMaxRatio") {
+                    s.globalMaxRatio = dict["globalMaxRatio"] as? Double
+                }
+                if dict.keys.contains("globalMaxSeedingTimeMinutes") {
+                    s.globalMaxSeedingTimeMinutes = dict["globalMaxSeedingTimeMinutes"] as? Int
+                }
+                if let v = dict["seedLimitAction"] as? String,
+                   let action = SeedLimitAction(rawValue: v) {
+                    s.seedLimitAction = action
+                }
+                if let v = dict["minimumSeedTimeMinutes"] as? Int { s.minimumSeedTimeMinutes = v }
+                if let v = dict["healthStallMinutes"]     as? Int { s.healthStallMinutes = v }
+                if let v = dict["healthReannounceOnStall"] as? Bool { s.healthReannounceOnStall = v }
+            }
+            return plainText("")
+        }
+
+        // MARK: Controllarr: health
+
+        router.get("/api/controllarr/health") { _, _ -> Response in
+            let issues = await services.healthMonitor.snapshot()
+            let out: [[String: Any]] = issues.map { issue in
+                [
+                    "infoHash": issue.infoHash,
+                    "name": issue.name,
+                    "reason": issue.reason.rawValue,
+                    "firstSeen": issue.firstSeen.timeIntervalSince1970,
+                    "lastProgress": issue.lastProgress,
+                    "lastUpdated": issue.lastUpdated.timeIntervalSince1970,
+                ]
+            }
+            return json(out)
+        }
+        router.post("/api/controllarr/health/clear") { request, _ -> Response in
+            let form = FormParser.parse(try await request.body.collect(upTo: 64 * 1024))
+            if let hash = form["hash"] {
+                await services.healthMonitor.clearIssue(hash: hash)
+            }
+            return plainText("")
+        }
+
+        // MARK: Controllarr: post-processor
+
+        router.get("/api/controllarr/postprocessor") { _, _ -> Response in
+            let records = await services.postProcessor.snapshot()
+            let out: [[String: Any]] = records.map { r in
+                var dict: [String: Any] = [
+                    "infoHash": r.infoHash,
+                    "name": r.name,
+                    "stage": stageString(r.stage),
+                    "lastUpdated": r.lastUpdated.timeIntervalSince1970,
+                ]
+                if let c = r.category { dict["category"] = c }
+                if let m = r.message  { dict["message"]  = m }
+                return dict
+            }
+            return json(out)
+        }
+
+        // MARK: Controllarr: seeding enforcement log
+
+        router.get("/api/controllarr/seeding") { _, _ -> Response in
+            let records = await services.seedingPolicy.snapshot()
+            let out: [[String: Any]] = records.map { e in
+                [
+                    "infoHash": e.infoHash,
+                    "name": e.name,
+                    "reason": e.reason,
+                    "action": e.action.rawValue,
+                    "timestamp": e.timestamp.timeIntervalSince1970,
+                ]
+            }
+            return json(out)
+        }
+
+        // MARK: Controllarr: log viewer
+
+        router.get("/api/controllarr/log") { request, _ -> Response in
+            let query = FormParser.parseQuery(request.uri.query ?? "")
+            let limit = Int(query["limit"] ?? "") ?? 500
+            let entries = await services.logger.snapshot(limit: limit)
+            let out: [[String: Any]] = entries.map { e in
+                [
+                    "id": e.id.uuidString,
+                    "timestamp": e.timestamp.timeIntervalSince1970,
+                    "level": e.level.rawValue,
+                    "source": e.source,
+                    "message": e.message,
+                ]
+            }
+            return json(out)
+        }
+    }
+
+    // MARK: - Serialization helpers
+
+    static func categoryDict(_ c: Persistence.Category) -> [String: Any] {
+        var dict: [String: Any] = [
+            "name": c.name,
+            "savePath": c.savePath,
+            "extractArchives": c.extractArchives,
+            "blockedExtensions": c.blockedExtensions,
+        ]
+        if let v = c.completePath { dict["completePath"] = v }
+        if let v = c.maxRatio { dict["maxRatio"] = v }
+        if let v = c.maxSeedingTimeMinutes { dict["maxSeedingTimeMinutes"] = v }
+        return dict
+    }
+
+    static func settingsDict(_ s: Settings) -> [String: Any] {
+        var dict: [String: Any] = [
+            "listenPortRangeStart": Int(s.listenPortRangeStart),
+            "listenPortRangeEnd":   Int(s.listenPortRangeEnd),
+            "stallThresholdMinutes": s.stallThresholdMinutes,
+            "defaultSavePath": s.defaultSavePath,
+            "webUIHost": s.webUIHost,
+            "webUIPort": s.webUIPort,
+            "webUIUsername": s.webUIUsername,
+            "seedLimitAction": s.seedLimitAction.rawValue,
+            "minimumSeedTimeMinutes": s.minimumSeedTimeMinutes,
+            "healthStallMinutes": s.healthStallMinutes,
+            "healthReannounceOnStall": s.healthReannounceOnStall,
+        ]
+        if let v = s.globalMaxRatio { dict["globalMaxRatio"] = v }
+        if let v = s.globalMaxSeedingTimeMinutes { dict["globalMaxSeedingTimeMinutes"] = v }
+        return dict
+    }
+
+    static func stageString(_ stage: PostProcessor.Stage) -> String {
+        switch stage {
+        case .pending:                    return "pending"
+        case .movingStorage(let target, _): return "moving:\(target)"
+        case .extracting:                 return "extracting"
+        case .done:                       return "done"
+        case .failed(let reason):         return "failed:\(reason)"
         }
     }
 

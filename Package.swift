@@ -21,6 +21,7 @@ let package = Package(
         .library(name: "TorrentEngine",  targets: ["TorrentEngine"]),
         .library(name: "Persistence",    targets: ["Persistence"]),
         .library(name: "PortWatcher",    targets: ["PortWatcher"]),
+        .library(name: "Services",       targets: ["Services"]),
         .library(name: "HTTPServer",     targets: ["HTTPServer"]),
         .library(name: "ControllarrCore",targets: ["ControllarrCore"]),
         .executable(name: "ControllarrPoC", targets: ["ControllarrPoC"]),
@@ -74,12 +75,20 @@ let package = Package(
             path: "Sources/PortWatcher"
         ),
 
+        // MARK: - Post-processing, seeding policy, health monitor, logger
+        .target(
+            name: "Services",
+            dependencies: ["TorrentEngine", "Persistence"],
+            path: "Sources/Services"
+        ),
+
         // MARK: - Embedded HTTP server + qBittorrent Web API compatibility
         .target(
             name: "HTTPServer",
             dependencies: [
                 "TorrentEngine",
                 "Persistence",
+                "Services",
                 .product(name: "Hummingbird", package: "hummingbird"),
             ],
             path: "Sources/HTTPServer"
@@ -92,6 +101,7 @@ let package = Package(
                 "TorrentEngine",
                 "Persistence",
                 "PortWatcher",
+                "Services",
                 "HTTPServer",
             ],
             path: "Sources/ControllarrCore"

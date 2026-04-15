@@ -262,6 +262,47 @@ static NSString *ctrl_build_listen_interfaces(uint16_t port, BOOL bindAll) {
     return YES;
 }
 
+- (NSArray<NSString *> *)fileNamesForInfoHash:(NSString *)infoHash {
+    auto h = [self handleFor:infoHash];
+    if (!h.is_valid()) return nil;
+    std::shared_ptr<const lt::torrent_info> ti = h.torrent_file();
+    if (!ti) return nil; // metadata not yet available
+    auto const &fs = ti->files();
+    int nfiles = fs.num_files();
+    NSMutableArray<NSString *> *out = [NSMutableArray arrayWithCapacity:nfiles];
+    for (lt::file_index_t i{0}; i < fs.end_file(); ++i) {
+        [out addObject:ctrl_nsstring(fs.file_path(i))];
+    }
+    return out;
+}
+
+- (BOOL)setFilePriorities:(NSArray<NSNumber *> *)priorities
+              forInfoHash:(NSString *)infoHash {
+    auto h = [self handleFor:infoHash];
+    if (!h.is_valid()) return NO;
+    std::shared_ptr<const lt::torrent_info> ti = h.torrent_file();
+    if (!ti) return NO;
+    int nfiles = ti->num_files();
+    if ((int)priorities.count != nfiles) return NO;
+    std::vector<lt::download_priority_t> prios;
+    prios.reserve(nfiles);
+    for (NSNumber *n in priorities) {
+        int v = n.intValue;
+        if (v < 0) v = 0;
+        if (v > 7) v = 7;
+        prios.push_back(lt::download_priority_t{static_cast<std::uint8_t>(v)});
+    }
+    h.prioritize_files(prios);
+    return YES;
+}
+
+- (BOOL)reannounceTorrent:(NSString *)infoHash {
+    auto h = [self handleFor:infoHash];
+    if (!h.is_valid()) return NO;
+    h.force_reannounce();
+    return YES;
+}
+
 // MARK: Reading
 
 static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {

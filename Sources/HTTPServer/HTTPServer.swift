@@ -13,6 +13,7 @@ import HummingbirdCore
 import NIOCore
 import TorrentEngine
 import Persistence
+import Services
 
 public actor HTTPServer {
 
@@ -33,6 +34,10 @@ public actor HTTPServer {
     public struct Services: Sendable {
         public let engine: TorrentEngine
         public let store: PersistenceStore
+        public let logger: Logger
+        public let postProcessor: PostProcessor
+        public let seedingPolicy: SeedingPolicy
+        public let healthMonitor: HealthMonitor
         /// Closure the WebUI exposes as "cycle port now" — implemented by
         /// the PortWatcher. Kept as a closure so HTTPServer doesn't take a
         /// hard dependency on PortWatcher.
@@ -40,10 +45,18 @@ public actor HTTPServer {
         public init(
             engine: TorrentEngine,
             store: PersistenceStore,
+            logger: Logger,
+            postProcessor: PostProcessor,
+            seedingPolicy: SeedingPolicy,
+            healthMonitor: HealthMonitor,
             forceCyclePort: @escaping @Sendable () async -> Void
         ) {
             self.engine = engine
             self.store = store
+            self.logger = logger
+            self.postProcessor = postProcessor
+            self.seedingPolicy = seedingPolicy
+            self.healthMonitor = healthMonitor
             self.forceCyclePort = forceCyclePort
         }
     }

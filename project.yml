@@ -14,7 +14,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "0.2.0"
     CURRENT_PROJECT_VERSION: "1"
     ONLY_ACTIVE_ARCH: YES
     ENABLE_HARDENED_RUNTIME: YES
@@ -46,7 +46,7 @@ targets:
       properties:
         CFBundleIconFile: AppIcon
         CFBundleIconName: AppIcon
-        LSUIElement: YES
+        LSUIElement: NO
         CFBundleDisplayName: Controllarr
         NSHumanReadableCopyright: "Copyright © 2026 Everett Jenkins. MIT Licensed."
         LSMinimumSystemVersion: "15.0"
@@ -61,5 +61,7 @@ targets:
         product: Persistence
       - package: Controllarr
         product: PortWatcher
+      - package: Controllarr
+        product: Services
       - package: Controllarr
         product: HTTPServer
