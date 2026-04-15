@@ -1,0 +1,42 @@
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Xcode
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+# Node / React WebUI
+node_modules/
+dist/
+.vite/
+*.log
+.env
+.env.local
+
+# Controllarr runtime state (created at run time, not checked in)
+.controllarr/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Editors
+.vscode/
+.idea/
+*.swp
