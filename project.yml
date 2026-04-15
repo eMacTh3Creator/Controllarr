@@ -1,0 +1,62 @@
+name: Controllarr
+options:
+  bundleIdPrefix: com.controllarr
+  deploymentTarget:
+    macOS: "15.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+packages:
+  Controllarr:
+    path: .
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ONLY_ACTIVE_ARCH: YES
+    ENABLE_HARDENED_RUNTIME: YES
+    # Ad-hoc sign by default so the .app runs locally without a
+    # Developer ID certificate. Override to your identity when you
+    # have one.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+
+targets:
+  Controllarr:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+      - path: WebUI/dist
+        name: WebUI
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: Controllarr
+        PRODUCT_BUNDLE_IDENTIFIER: com.controllarr.Controllarr
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Controllarr
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Everett Jenkins. MIT Licensed."
+        INFOPLIST_KEY_LSMinimumSystemVersion: "15.0"
+        # Silence the background-tasks warning since we don't use them yet.
+        INFOPLIST_KEY_NSSupportsAutomaticTermination: NO
+        INFOPLIST_KEY_NSSupportsSuddenTermination: NO
+        CODE_SIGN_ENTITLEMENTS: App/Controllarr.entitlements
+    dependencies:
+      - package: Controllarr
+        product: ControllarrCore
+      - package: Controllarr
+        product: TorrentEngine
+      - package: Controllarr
+        product: Persistence
+      - package: Controllarr
+        product: PortWatcher
+      - package: Controllarr
+        product: HTTPServer

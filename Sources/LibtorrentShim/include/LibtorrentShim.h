@@ -1,65 +1,131 @@
 //
 //  LibtorrentShim.h
-//  Controllarr — Phase 0 PoC
+//  Controllarr — Phase 1
 //
-//  Small Objective-C surface that Swift imports. Everything C++ / libtorrent
-//  is hidden behind this wall so the Swift side never sees <libtorrent/*>.
+//  Obj-C surface over libtorrent-rasterbar. Swift imports this header via
+//  the generated module map; the `.mm` implementation is the only place in
+//  the entire project that sees <libtorrent/*>.
 //
 
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// Simplified torrent state for the Swift side. Mirrors libtorrent's
-/// state_t but reshaped to a stable Obj-C enum — we own the ABI here.
 typedef NS_ENUM(NSInteger, CTRLTorrentState) {
-    CTRLTorrentStateUnknown         = 0,
-    CTRLTorrentStateCheckingFiles   = 1,
+    CTRLTorrentStateUnknown             = 0,
+    CTRLTorrentStateCheckingFiles       = 1,
     CTRLTorrentStateDownloadingMetadata = 2,
-    CTRLTorrentStateDownloading     = 3,
-    CTRLTorrentStateFinished        = 4,
-    CTRLTorrentStateSeeding         = 5,
-    CTRLTorrentStateCheckingResume  = 6,
+    CTRLTorrentStateDownloading         = 3,
+    CTRLTorrentStateFinished            = 4,
+    CTRLTorrentStateSeeding             = 5,
+    CTRLTorrentStateCheckingResume      = 6,
+    CTRLTorrentStatePaused              = 7,
 };
 
-/// Snapshot of one torrent at the moment `pollStats` was called.
+/// Point-in-time snapshot of one torrent. All fields are immutable after
+/// `-[CTRLSession pollStats]` returns.
 @interface CTRLTorrentStats : NSObject
-@property (nonatomic, readonly, copy)   NSString *name;
-@property (nonatomic, readonly, copy)   NSString *infoHash;
-@property (nonatomic, readonly)         float      progress;      // 0.0 – 1.0
-@property (nonatomic, readonly)         CTRLTorrentState state;
-@property (nonatomic, readonly)         int64_t    downloadRate;  // bytes/sec
-@property (nonatomic, readonly)         int64_t    uploadRate;    // bytes/sec
-@property (nonatomic, readonly)         int64_t    totalWanted;   // bytes
-@property (nonatomic, readonly)         int64_t    totalDone;     // bytes
-@property (nonatomic, readonly)         int        numPeers;
-@property (nonatomic, readonly)         int        numSeeds;
+@property (nonatomic, readonly, copy) NSString *name;
+@property (nonatomic, readonly, copy) NSString *infoHash;
+@property (nonatomic, readonly, copy) NSString *savePath;
+@property (nonatomic, readonly)       float      progress;      // 0.0 – 1.0
+@property (nonatomic, readonly)       CTRLTorrentState state;
+@property (nonatomic, readonly)       BOOL       paused;
+@property (nonatomic, readonly)       int64_t    downloadRate;  // bytes/sec
+@property (nonatomic, readonly)       int64_t    uploadRate;    // bytes/sec
+@property (nonatomic, readonly)       int64_t    totalWanted;
+@property (nonatomic, readonly)       int64_t    totalDone;
+@property (nonatomic, readonly)       int64_t    totalDownload; // session total
+@property (nonatomic, readonly)       int64_t    totalUpload;
+@property (nonatomic, readonly)       double     ratio;
+@property (nonatomic, readonly)       int        numPeers;
+@property (nonatomic, readonly)       int        numSeeds;
+@property (nonatomic, readonly)       int        etaSeconds;     // -1 if unknown
+@property (nonatomic, readonly)       NSDate    *addedDate;
 @end
 
-/// Owning handle on a libtorrent session. One per process for the PoC.
+/// Coarse session-wide counters for the port watcher + web UI dashboard.
+@interface CTRLSessionStats : NSObject
+@property (nonatomic, readonly) int64_t downloadRate;        // bytes/sec
+@property (nonatomic, readonly) int64_t uploadRate;          // bytes/sec
+@property (nonatomic, readonly) int64_t totalBytesDownloaded;
+@property (nonatomic, readonly) int64_t totalBytesUploaded;
+@property (nonatomic, readonly) int     numTorrents;
+@property (nonatomic, readonly) int     numPeersConnected;
+@property (nonatomic, readonly) BOOL    hasIncomingConnections;
+@property (nonatomic, readonly) uint16_t listenPort;
+@end
+
+/// Owning handle on a single libtorrent session. One per process.
 @interface CTRLSession : NSObject
 
 /// Bring up a session listening on `port`, saving new torrents under
-/// `savePath`. `savePath` must exist.
+/// `savePath`. `savePath` must already exist on disk.
+/// `bindAllInterfaces` = NO restricts listen binding to 0.0.0.0 + [::] only,
+/// skipping link-local / tunnel / bridge interfaces (strongly recommended;
+/// the Phase 0 default bound to all interfaces and generated a lot of noise).
 - (instancetype)initWithSavePath:(NSString *)savePath
-                      listenPort:(uint16_t)port NS_DESIGNATED_INITIALIZER;
+                      listenPort:(uint16_t)port
+               bindAllInterfaces:(BOOL)bindAllInterfaces NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
 
-/// Add a magnet URI. Returns NO and fills `error` on failure.
-- (BOOL)addMagnet:(NSString *)magnetURI error:(NSError * _Nullable *)error;
+// MARK: Adding torrents
 
-/// Add a `.torrent` file by path.
-- (BOOL)addTorrentFile:(NSString *)path error:(NSError * _Nullable *)error;
+- (BOOL)addMagnet:(NSString *)magnetURI
+         savePath:(nullable NSString *)savePath
+            error:(NSError * _Nullable *)error;
 
-/// Snapshot every currently-known torrent. Safe to call from any thread.
+- (BOOL)addTorrentFile:(NSString *)path
+              savePath:(nullable NSString *)savePath
+                 error:(NSError * _Nullable *)error;
+
+// MARK: Mutating torrents
+
+/// Pause a torrent by info hash (hex, lowercase). Returns NO if not found.
+- (BOOL)pauseTorrent:(NSString *)infoHash;
+- (BOOL)resumeTorrent:(NSString *)infoHash;
+
+/// Remove a torrent by info hash. If `deleteFiles` is YES, the on-disk
+/// files are removed too. Returns NO if not found.
+- (BOOL)removeTorrent:(NSString *)infoHash deleteFiles:(BOOL)deleteFiles;
+
+/// Move the save path of a torrent (the 'move' variant copies + deletes;
+/// 'rename' variant just updates the stored path without moving files).
+- (BOOL)moveTorrent:(NSString *)infoHash toPath:(NSString *)path;
+
+// MARK: Reading state
+
 - (NSArray<CTRLTorrentStats *> *)pollStats;
+- (nullable CTRLTorrentStats *)statsForInfoHash:(NSString *)infoHash;
+- (CTRLSessionStats *)sessionStats;
 
-/// Drain the alert queue and forward any error-category alerts as NSLog
-/// lines. Phase 0 just wants visibility — structured handling comes later.
+// MARK: Listen port control (the #1 feature)
+
+/// Change the listen port at runtime. Updates libtorrent's
+/// listen_interfaces setting and re-binds. Safe to call repeatedly.
+- (void)setListenPort:(uint16_t)port;
+
+/// Force a re-announce to all trackers on all torrents.
+- (void)forceReannounceAll;
+
+// MARK: Alerts
+
+/// Drain the libtorrent alert queue, NSLog'ing any error-category messages.
+/// Phase 1 still keeps this simple — Phase 2 will route alerts into a
+/// structured log viewer.
 - (void)drainAlerts;
 
-/// Gracefully shut down the session.
+// MARK: Lifecycle
+
+/// Ask libtorrent to serialize resume data for every torrent and write it
+/// under `directory` as `<infohash>.fastresume`. Safe to call periodically.
+- (void)saveResumeDataTo:(NSString *)directory;
+
+/// Load any `<infohash>.fastresume` files found under `directory` and
+/// re-add the torrents. Counterpart to -saveResumeDataTo:.
+- (void)loadResumeDataFrom:(NSString *)directory;
+
 - (void)shutdown;
 
 @end
