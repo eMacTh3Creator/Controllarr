@@ -230,7 +230,7 @@ static int ctrl_balanced_hashing_threads() {
         lt::settings_pack pack;
         pack.set_str(lt::settings_pack::listen_interfaces,
                      ctrl_build_listen_interfaces(port, bindAll).UTF8String);
-        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.0.1 libtorrent/2.0");
+        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.0.2 libtorrent/2.0");
         pack.set_int(lt::settings_pack::alert_mask,
                      lt::alert_category::error
                      | lt::alert_category::status

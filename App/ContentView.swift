@@ -241,6 +241,10 @@ struct TorrentsView: View {
     @State private var selectedHash: String?
     @State private var dropTargeted = false
     @State private var statusFilter: TorrentStatusFilter = .all
+    /// Empty string = "All Categories".
+    /// "__none__" sentinel = "Uncategorized only".
+    /// Any other value = exact category-name match.
+    @State private var categoryFilter: String = ""
     @State private var sortOrder: [KeyPathComparator<TorrentStats>] = [
         KeyPathComparator(\.name, order: .forward)
     ]
@@ -249,8 +253,23 @@ struct TorrentsView: View {
     @SceneStorage("TorrentsTable.columnCustomization")
     private var columnCustomization: TableColumnCustomization<TorrentStats>
 
+    /// Sentinel value used in the picker for "Uncategorized". Kept out of
+    /// the valid-category namespace so it can never collide with a real
+    /// user-defined category.
+    private static let uncategorizedTag = "__none__"
+
+    private func matchesCategoryFilter(_ t: TorrentStats) -> Bool {
+        switch categoryFilter {
+        case "":                          return true
+        case Self.uncategorizedTag:       return (t.category ?? "").isEmpty
+        default:                          return (t.category ?? "") == categoryFilter
+        }
+    }
+
     private var filteredSortedTorrents: [TorrentStats] {
-        vm.torrents.filter { statusFilter.matches($0) }.sorted(using: sortOrder)
+        vm.torrents
+            .filter { statusFilter.matches($0) && matchesCategoryFilter($0) }
+            .sorted(using: sortOrder)
     }
 
     var body: some View {
@@ -272,6 +291,25 @@ struct TorrentsView: View {
                         s.uiPreferences.torrentStatusFilter = new.rawValue
                         Task { await vm.saveSettings(s) }
                     }
+
+                    Picker("Category", selection: $categoryFilter) {
+                        Text("All Categories").tag("")
+                        Text("Uncategorized").tag(Self.uncategorizedTag)
+                        if !vm.categories.isEmpty {
+                            Divider()
+                            ForEach(vm.categories.map(\.name).sorted(), id: \.self) { name in
+                                Text(name).tag(name)
+                            }
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 200)
+                    .onChange(of: categoryFilter) { _, new in
+                        var s = vm.settings
+                        s.uiPreferences.torrentCategoryFilter = new
+                        Task { await vm.saveSettings(s) }
+                    }
+
                     Spacer()
                     Text("\(filteredSortedTorrents.count) of \(vm.torrents.count)")
                         .font(.caption).foregroundStyle(.secondary)
@@ -323,12 +361,13 @@ struct TorrentsView: View {
                     }.width(min: 80, ideal: 100).customizationID("category")
                 }
                 .onAppear {
-                    // Hydrate persisted status filter on first load.
+                    // Hydrate persisted filters on first load.
                     if let restored = TorrentStatusFilter(
                         rawValue: vm.settings.uiPreferences.torrentStatusFilter
                     ) {
                         statusFilter = restored
                     }
+                    categoryFilter = vm.settings.uiPreferences.torrentCategoryFilter
                 }
 
                 Divider()

@@ -12,11 +12,22 @@ import SwiftUI
 import ControllarrCore
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private var statusItem: NSStatusItem?
     private var statsTimer: Timer?
     private var statusLineItem: NSMenuItem?
+
+    /// Cached reference to the SwiftUI main window. Captured once the
+    /// scene installs it so `showWindow` can bring it back from any state
+    /// (visible, ordered-out, miniaturized) without relying on
+    /// `NSApp.windows` iteration — which can return an empty list after
+    /// SwiftUI teardown on a red-X close.
+    private weak var mainWindow: NSWindow?
+    /// Previous delegate (SwiftUI's own) so we can forward unhandled
+    /// messages and not break state restoration.
+    private weak var forwardingWindowDelegate: NSWindowDelegate?
+    private var windowAttached: Bool = false
 
     /// Files/URLs received before the runtime finishes booting.
     /// Drained once RuntimeViewModel.isBooting becomes false.
@@ -35,10 +46,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 while RuntimeViewModel.shared.isBooting {
                     try? await Task.sleep(nanoseconds: 200_000_000)
                 }
+                self.attachToMainWindow()
                 self.applyInterfacePreferences()
             }
         }
     }
+
+    /// Find the SwiftUI-managed main window, cache a reference to it,
+    /// keep it retained across close events, and hook ourselves in as its
+    /// delegate so we can intercept `windowShouldClose` for close-to-menu-bar.
+    private func attachToMainWindow() {
+        guard !windowAttached else { return }
+        guard let window = NSApp.windows.first(where: { $0.canBecomeMain }) else { return }
+        window.isReleasedWhenClosed = false
+        forwardingWindowDelegate = window.delegate
+        window.delegate = self
+        mainWindow = window
+        windowAttached = true
+    }
+
+    // MARK: - NSWindowDelegate
+
+    nonisolated func windowShouldClose(_ sender: NSWindow) -> Bool {
+        MainActor.assumeIsolated {
+            let prefs = RuntimeViewModel.shared.settings.uiPreferences
+            if prefs.menuBarEnabled && prefs.closeToMenuBar {
+                // User wants close-to-menu-bar: hide rather than tear down
+                // so `showWindow` can bring it straight back.
+                sender.orderOut(nil)
+                return false
+            }
+            if let forward = forwardingWindowDelegate,
+               forward.responds(to: #selector(NSWindowDelegate.windowShouldClose(_:))),
+               let answer = forward.windowShouldClose?(sender) {
+                return answer
+            }
+            return true
+        }
+    }
+
+    // We only override `windowShouldClose`; every other NSWindowDelegate
+    // callback reaches SwiftUI through its own internal wiring (it uses
+    // notification observers, not delegate dispatch, for scene lifecycle).
 
     /// Pull the current `UIPreferences` off the runtime and reconcile the
     /// live menu-bar state. Called on boot completion and every time the
@@ -57,12 +106,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Start minimized — close the main window if requested and if the
-        // menu-bar icon is the user's entry point back to the UI.
+        // Start minimized — hide the main window if requested and if the
+        // menu-bar icon is the user's entry point back to the UI. Use
+        // orderOut (not close) so SwiftUI keeps the NSWindow alive and
+        // `showWindow` can re-key it later.
         if prefs.menuBarEnabled && prefs.startMinimized && !didHandleStartMinimized {
             didHandleStartMinimized = true
-            for window in NSApp.windows where window.canBecomeMain {
-                window.close()
+            if let window = mainWindow ?? NSApp.windows.first(where: { $0.canBecomeMain }) {
+                window.orderOut(nil)
             }
         }
     }
@@ -86,13 +137,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> Bool {
         MainActor.assumeIsolated {
             if !flag {
-                for window in NSApp.windows where window.canBecomeMain {
-                    window.makeKeyAndOrderFront(nil)
-                    return false
-                }
+                self.bringMainWindowForward()
+                return false
             }
             return true
         }
+    }
+
+    /// Core logic shared by `showWindow` (menu-bar action) and
+    /// `applicationShouldHandleReopen` (Dock-icon click). Tries the cached
+    /// reference first; if SwiftUI has torn the window down completely,
+    /// falls back to iterating `NSApp.windows`.
+    private func bringMainWindowForward() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = mainWindow {
+            window.setIsVisible(true)
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        for window in NSApp.windows where window.canBecomeMain {
+            mainWindow = window
+            window.isReleasedWhenClosed = false
+            window.setIsVisible(true)
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        // Nothing to re-key — SwiftUI destroyed the window entirely.
+        // Ask the Cocoa responder chain to open a new one; SwiftUI
+        // WindowGroup handles this via its `newWindowForTab:` fallback.
+        NSApp.sendAction(Selector(("newWindowForTab:")), to: nil, from: nil)
     }
 
     nonisolated func applicationWillTerminate(_ notification: Notification) {
@@ -177,11 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         // Bring the window to front so the user sees the added torrent.
-        NSApp.activate(ignoringOtherApps: true)
-        for window in NSApp.windows where window.canBecomeMain {
-            window.makeKeyAndOrderFront(nil)
-            return
-        }
+        bringMainWindowForward()
     }
 
     private func addMagnetURI(_ uri: String) {
@@ -193,11 +264,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("[Controllarr] Failed to add magnet URI: \(error)")
             }
         }
-        NSApp.activate(ignoringOtherApps: true)
-        for window in NSApp.windows where window.canBecomeMain {
-            window.makeKeyAndOrderFront(nil)
-            return
-        }
+        bringMainWindowForward()
     }
 
     // MARK: - Status menu
@@ -269,11 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showWindow() {
-        NSApp.activate(ignoringOtherApps: true)
-        for window in NSApp.windows where window.canBecomeMain {
-            window.makeKeyAndOrderFront(nil)
-            return
-        }
+        bringMainWindowForward()
     }
 
     @objc private func openWebUI() {

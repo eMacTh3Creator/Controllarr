@@ -227,6 +227,11 @@ public struct UIPreferences: Codable, Sendable, Equatable {
     public var torrentSortAscending: Bool
     /// Last-selected torrent status filter.
     public var torrentStatusFilter: String
+    /// Last-selected torrent category filter. Empty string = "all
+    /// categories"; the sentinel `"__none__"` = "uncategorized only";
+    /// any other value matches torrents whose assigned category name
+    /// exactly equals this string.
+    public var torrentCategoryFilter: String
 
     public init(
         menuBarEnabled: Bool = true,
@@ -235,7 +240,8 @@ public struct UIPreferences: Codable, Sendable, Equatable {
         torrentColumnWidths: [String: Double] = [:],
         torrentSortKey: String? = nil,
         torrentSortAscending: Bool = true,
-        torrentStatusFilter: String = "all"
+        torrentStatusFilter: String = "all",
+        torrentCategoryFilter: String = ""
     ) {
         self.menuBarEnabled = menuBarEnabled
         self.startMinimized = startMinimized
@@ -244,6 +250,21 @@ public struct UIPreferences: Codable, Sendable, Equatable {
         self.torrentSortKey = torrentSortKey
         self.torrentSortAscending = torrentSortAscending
         self.torrentStatusFilter = torrentStatusFilter
+        self.torrentCategoryFilter = torrentCategoryFilter
+    }
+
+    // Custom decoder so adding new fields doesn't break forward-compat
+    // with older state.json files that don't carry every key yet.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.menuBarEnabled = try c.decodeIfPresent(Bool.self, forKey: .menuBarEnabled) ?? true
+        self.startMinimized = try c.decodeIfPresent(Bool.self, forKey: .startMinimized) ?? false
+        self.closeToMenuBar = try c.decodeIfPresent(Bool.self, forKey: .closeToMenuBar) ?? false
+        self.torrentColumnWidths = try c.decodeIfPresent([String: Double].self, forKey: .torrentColumnWidths) ?? [:]
+        self.torrentSortKey = try c.decodeIfPresent(String.self, forKey: .torrentSortKey)
+        self.torrentSortAscending = try c.decodeIfPresent(Bool.self, forKey: .torrentSortAscending) ?? true
+        self.torrentStatusFilter = try c.decodeIfPresent(String.self, forKey: .torrentStatusFilter) ?? "all"
+        self.torrentCategoryFilter = try c.decodeIfPresent(String.self, forKey: .torrentCategoryFilter) ?? ""
     }
 }
 
