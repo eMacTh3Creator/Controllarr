@@ -10,6 +10,9 @@ options:
 packages:
   Controllarr:
     path: .
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle.git
+    from: "2.9.0"
 
 settings:
   base:
@@ -53,6 +56,8 @@ targets:
         LSApplicationCategoryType: "public.app-category.utilities"
         NSSupportsAutomaticTermination: NO
         NSSupportsSuddenTermination: NO
+        SUFeedURL: "https://raw.githubusercontent.com/eMacTh3Creator/Controllarr/main/appcast.xml"
+        SUEnableAutomaticChecks: true
     dependencies:
       - package: Controllarr
         product: ControllarrCore
@@ -66,3 +71,5 @@ targets:
         product: Services
       - package: Controllarr
         product: HTTPServer
+      - package: Sparkle
+        product: Sparkle

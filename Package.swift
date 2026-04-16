@@ -28,6 +28,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.0.0"),
+        .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.9.0"),
     ],
     targets: [
         // MARK: - Libtorrent wall (Obj-C++)

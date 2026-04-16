@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Controllarr Updates</title>
+    <description>Automatic update feed for Controllarr.</description>
+    <language>en</language>
+    <item>
+      <title>Version 1.0.0</title>
+      <sparkle:version>1</sparkle:version>
+      <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+      <sparkle:releaseNotesLink>https://github.com/eMacTh3Creator/Controllarr/releases/tag/v1.0.0</sparkle:releaseNotesLink>
+      <pubDate>Tue, 15 Apr 2026 22:00:00 +0000</pubDate>
+      <enclosure
+        url="https://github.com/eMacTh3Creator/Controllarr/releases/download/v1.0.0/Controllarr-v1.0.0-macOS-arm64.zip"
+        length="0"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>

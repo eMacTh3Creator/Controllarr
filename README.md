@@ -29,11 +29,8 @@ Controllarr uses [libtorrent-rasterbar](https://www.libtorrent.org/) as its engi
 - **Per-torrent save path** — `savepath` override from *arr apps wired through to libtorrent
 - **.torrent file upload** from the browser WebUI (drag-and-drop or file picker)
 - **25-test suite** covering schema migration, archive detection, policy enums, Keychain ops, disk-space, and *arr endpoints
+- **Sparkle auto-update** — checks for new versions via appcast and installs in-place
 - **Modern React web UI** with live stats, log viewer, settings editor, full category management, and torrent file upload
-
-## Planned
-
-- Sparkle auto-update
 
 ## Requirements
 
