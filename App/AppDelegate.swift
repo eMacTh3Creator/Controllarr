@@ -1,10 +1,10 @@
 //
 //  AppDelegate.swift
-//  Controllarr — Phase 2
+//  Controllarr — v1.1
 //
 //  Regular-app AppDelegate. Installs an NSStatusItem as a convenience
-//  menu-bar surface, waits for the SwiftUI ContentView to boot the
-//  shared RuntimeViewModel, and shuts the runtime down on quit.
+//  menu-bar surface, handles .torrent file opens and magnet: URL scheme
+//  from the OS, and shuts the runtime down on quit.
 //
 
 import AppKit
@@ -16,6 +16,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem?
     private var statsTimer: Timer?
+
+    /// Files/URLs received before the runtime finishes booting.
+    /// Drained once RuntimeViewModel.isBooting becomes false.
+    private var pendingTorrentFiles: [URL] = []
+    private var pendingMagnetURIs: [String] = []
 
     nonisolated func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
@@ -36,6 +41,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sema.signal()
         }
         _ = sema.wait(timeout: .now() + 5)
+    }
+
+    // MARK: - File open handling (.torrent files from Finder / double-click)
+
+    nonisolated func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        MainActor.assumeIsolated {
+            let torrentFiles = filenames
+                .map { URL(fileURLWithPath: $0) }
+                .filter { $0.pathExtension.lowercased() == "torrent" }
+
+            guard !torrentFiles.isEmpty else {
+                sender.reply(toOpenOrPrint: .failure)
+                return
+            }
+
+            let vm = RuntimeViewModel.shared
+            if vm.isBooting {
+                pendingTorrentFiles.append(contentsOf: torrentFiles)
+            } else {
+                addTorrentFiles(torrentFiles)
+            }
+            sender.reply(toOpenOrPrint: .success)
+        }
+    }
+
+    // MARK: - URL scheme handling (magnet: links)
+
+    nonisolated func application(_ application: NSApplication, open urls: [URL]) {
+        MainActor.assumeIsolated {
+            for url in urls {
+                if url.scheme?.lowercased() == "magnet" {
+                    let magnetURI = url.absoluteString
+                    let vm = RuntimeViewModel.shared
+                    if vm.isBooting {
+                        pendingMagnetURIs.append(magnetURI)
+                    } else {
+                        addMagnetURI(magnetURI)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Deferred queue (process once runtime is ready)
+
+    /// Called by RuntimeViewModel after boot completes.
+    func drainPendingOpens() {
+        if !pendingTorrentFiles.isEmpty {
+            addTorrentFiles(pendingTorrentFiles)
+            pendingTorrentFiles.removeAll()
+        }
+        if !pendingMagnetURIs.isEmpty {
+            for uri in pendingMagnetURIs {
+                addMagnetURI(uri)
+            }
+            pendingMagnetURIs.removeAll()
+        }
+    }
+
+    private func addTorrentFiles(_ urls: [URL]) {
+        let vm = RuntimeViewModel.shared
+        for url in urls {
+            Task {
+                do {
+                    try await vm.addTorrentFile(at: url, category: nil)
+                } catch {
+                    NSLog("[Controllarr] Failed to add .torrent file \(url.lastPathComponent): \(error)")
+                }
+            }
+        }
+        // Bring the window to front so the user sees the added torrent.
+        NSApp.activate(ignoringOtherApps: true)
+        for window in NSApp.windows where window.canBecomeMain {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+    }
+
+    private func addMagnetURI(_ uri: String) {
+        let vm = RuntimeViewModel.shared
+        Task {
+            do {
+                try await vm.addMagnet(uri, category: nil)
+            } catch {
+                NSLog("[Controllarr] Failed to add magnet URI: \(error)")
+            }
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        for window in NSApp.windows where window.canBecomeMain {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
     }
 
     // MARK: - Status menu
@@ -70,9 +167,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let s = vm.session
         let title: String
         if vm.isBooting {
-            title = "Starting…"
+            title = "Starting..."
         } else {
-            title = "Port \(s.listenPort) · \(s.numTorrents) torrents · ↓\(formatRate(s.downloadRate)) ↑\(formatRate(s.uploadRate))"
+            title = "Port \(s.listenPort) \u{00B7} \(s.numTorrents) torrents \u{00B7} \u{2193}\(formatRate(s.downloadRate)) \u{2191}\(formatRate(s.uploadRate))"
         }
 
         let menu = NSMenu()

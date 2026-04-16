@@ -24,6 +24,7 @@ let package = Package(
         .library(name: "Services",       targets: ["Services"]),
         .library(name: "HTTPServer",     targets: ["HTTPServer"]),
         .library(name: "ControllarrCore",targets: ["ControllarrCore"]),
+        .executable(name: "ControllarrDaemon", targets: ["ControllarrDaemon"]),
         .executable(name: "ControllarrPoC", targets: ["ControllarrPoC"]),
     ],
     dependencies: [
@@ -106,6 +107,12 @@ let package = Package(
                 "HTTPServer",
             ],
             path: "Sources/ControllarrCore"
+        ),
+
+        .executableTarget(
+            name: "ControllarrDaemon",
+            dependencies: ["ControllarrCore", "Persistence"],
+            path: "Sources/ControllarrDaemon"
         ),
 
         // MARK: - Phase 0 PoC executable (still useful as a smoke test)

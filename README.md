@@ -8,7 +8,11 @@
 
 Controllarr uses [libtorrent-rasterbar](https://www.libtorrent.org/) as its engine and wraps it in a Swift + SwiftUI desktop app with both a native macOS window and an embedded React web UI. It speaks the qBittorrent Web API so existing *arr apps can point at it with zero extra configuration.
 
-**Status:** v1.1 — production-ready `.app` with native UI, qBittorrent Web API compatibility, React WebUI, post-processing pipeline, seeding policy, health monitoring, bandwidth scheduler, per-torrent file/tracker/peer detail, Keychain credential storage, disk-space-aware auto-pause, *arr re-search integration, and VPN-aware kill switch with interface binding. See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
+**Status:** v1.2 — production-ready `.app` with native UI, qBittorrent Web API compatibility, React WebUI, post-processing pipeline, seeding policy, health monitoring, bandwidth scheduler, per-torrent file/tracker/peer detail, Keychain credential storage, disk-space-aware auto-pause, *arr re-search integration, VPN-aware kill switch with interface binding, drag-and-drop `.torrent` support, recovery center with rule chaining, and backup/restore. See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
+
+The next major step is a larger **v1.5** release that turns Controllarr from "a Mac-native qBittorrent replacement for *arr apps" into a true download orchestration platform with deeper automation, remote operations, security, and observability. The current roadmap lives in [docs/V1_5_ROADMAP.md](docs/V1_5_ROADMAP.md).
+
+Initial v1.5 foundation work is already landing on `main`: there is now a headless `ControllarrDaemon` executable for always-on nodes, WebUI-driven backup/export/restore, health-based recovery rules plus recovery-center logging, manual post-processing retries, and operator-triggered disk-space rechecks. Usage notes live in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Features
 
@@ -25,14 +29,39 @@ Controllarr uses [libtorrent-rasterbar](https://www.libtorrent.org/) as its engi
 - **Keychain credential storage** for the WebUI password and *arr API keys
 - **VPN kill switch** — detects VPN tunnel interfaces (PIA, WireGuard, etc.) and pauses all torrents instantly when the VPN drops; auto-resumes on reconnect
 - **VPN interface binding** — binds libtorrent's outgoing and listen interfaces to the VPN adapter so torrent traffic never leaks through the default route
-- **Disk-space-aware auto-pause** — monitors free space and pauses downloads when below threshold
+- **Disk-space-aware auto-pause** — monitors free space, pauses downloads when below threshold, and exposes operator recheck telemetry in the WebUI
 - ***arr re-search integration** — proactive Sonarr/Radarr callbacks when torrents stall
 - **Session auth with expiry** — 1-hour token TTL, CORS support, cookie-based middleware
+- **Headless daemon executable** — run Controllarr without the app bundle for remote or always-on deployments
+- **Backup export / restore** — download the current state as JSON, optionally include Keychain-backed secrets, and restore it from the WebUI
+- **Recovery rules and recovery center** — automatically respond to unhealthy torrents, keep an action history of automatic/manual recovery attempts, and pair with manual post-processing retries
 - **Per-torrent save path** — `savepath` override from *arr apps wired through to libtorrent
 - **.torrent file upload** from the browser WebUI (drag-and-drop or file picker)
-- **30-test suite** covering schema migration, archive detection, policy enums, Keychain ops, disk-space, *arr endpoints, and VPN monitor
+- **42-test suite** covering schema migration, archive detection, recovery planning with rule chaining, post-processing retries, Keychain ops, disk-space, *arr endpoints, and VPN monitor
 - **Sparkle auto-update** — checks for new versions via appcast and installs in-place
 - **Modern React web UI** with live stats, log viewer, settings editor, full category management, and torrent file upload
+
+## Road To v1.5
+
+The big next-wave release should focus on turning Controllarr into a smarter media-delivery control plane rather than just a torrent session wrapper. The highest-impact additions are:
+
+- **Automation and playbooks** — rule-based actions for stalled torrents, import failures, tracker problems, low disk conditions, and post-processing retries
+- Progress started: health-based recovery rules now support automatic reannounce/pause/remove actions, failed post-processing jobs can be retried from the WebUI, and disk-space pauses expose explicit operator rechecks
+- **Deeper *arr orchestration** — richer Sonarr/Radarr callbacks, approval inboxes, import-readiness checks, re-search policies, and library-aware category templates
+- **Remote and distributed control** — headless daemon mode, multi-node management, WebSocket live updates, and a mobile-friendly remote dashboard
+- **Security and administration** — multi-user auth, audit logs, scoped API tokens, secret storage, and safer remote exposure defaults
+- **Reliability and observability** — health scorecards, recovery workflows, backup/restore, metrics, queue analytics, and better operational visibility
+- **Extensibility** — plugin hooks, outbound webhooks, scripting surfaces, and a cleaner public management API
+
+If you want the detailed feature slate, recommended scope, and stretch goals, start with [docs/V1_5_ROADMAP.md](docs/V1_5_ROADMAP.md).
+
+## Documentation
+
+- [docs/README.md](docs/README.md) — documentation index
+- [docs/OPERATIONS.md](docs/OPERATIONS.md) — headless daemon usage, backup/export/restore, recovery rules, post-processing retries, and disk-space operations
+- [docs/V1_5_ROADMAP.md](docs/V1_5_ROADMAP.md) — proposed big-ticket roadmap for the v1.5 release
+- [RELEASE_NOTES_v0.2.0.md](RELEASE_NOTES_v0.2.0.md) — native UI, post-processing, seeding policy, and health monitor release
+- [RELEASE_NOTES_v0.3.0.md](RELEASE_NOTES_v0.3.0.md) — torrent detail panes, trackers/peers, bandwidth scheduler, and API expansion
 
 ## Requirements
 
@@ -62,6 +91,22 @@ open /tmp/ControllarrBuild/Build/Products/Release/Controllarr.app
 The build automatically copies libtorrent-rasterbar and OpenSSL dylibs from Homebrew into the `.app` bundle and rewrites load paths, so the resulting app is self-contained.
 
 The Phase 0 CLI proof-of-concept is still buildable with `swift build` and runs as `.build/debug/ControllarrPoC <magnet-uri>`.
+
+## Headless mode
+
+For an always-on or remote-managed node, run the new daemon executable directly from SwiftPM:
+
+```sh
+swift run ControllarrDaemon --webui-root WebUI/dist
+```
+
+Optional flags:
+
+- `--state-dir /path/to/state` — override the Application Support directory
+- `--host 0.0.0.0` — override the configured bind host for this run
+- `--port 8791` — override the configured bind port for this run
+
+The daemon shares the same persistence format and WebUI/API surface as the app bundle, so the same browser UI and *arr integrations keep working.
 
 ## License
 

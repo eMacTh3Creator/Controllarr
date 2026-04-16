@@ -44,6 +44,29 @@ export type Category = {
 
 export type SeedLimitAction = 'pause' | 'remove_keep_files' | 'remove_delete_files'
 
+export type RecoveryTrigger =
+  | 'metadata_timeout'
+  | 'no_peers'
+  | 'stalled_with_peers'
+  | 'awaiting_recheck'
+  | 'post_process_move_failed'
+  | 'post_process_extraction_failed'
+  | 'disk_pressure'
+
+export type RecoveryAction =
+  | 'reannounce'
+  | 'pause'
+  | 'remove_keep_files'
+  | 'remove_delete_files'
+  | 'retry_post_process'
+
+export type RecoveryRule = {
+  enabled: boolean
+  trigger: RecoveryTrigger
+  action: RecoveryAction
+  delayMinutes: number
+}
+
 export type BandwidthScheduleRule = {
   name: string
   enabled: boolean
@@ -66,8 +89,11 @@ export type ArrEndpoint = {
 export type DiskSpaceStatus = {
   freeBytes: number
   thresholdBytes: number
+  monitorPath: string
+  shortfallBytes: number
   isPaused: boolean
   pausedCount: number
+  pausedHashes: string[]
 }
 
 export type ArrNotification = {
@@ -88,6 +114,14 @@ export type VPNStatus = {
   boundToVPN: boolean
 }
 
+export type BackupImportResult = {
+  restoredAt: number
+  categoryCount: number
+  endpointCount: number
+  includedSecrets: boolean
+  restartRecommended: boolean
+}
+
 export type Settings = {
   listenPortRangeStart: number
   listenPortRangeEnd: number
@@ -103,6 +137,7 @@ export type Settings = {
   minimumSeedTimeMinutes: number
   healthStallMinutes: number
   healthReannounceOnStall: boolean
+  recoveryRules: RecoveryRule[]
   bandwidthSchedule: BandwidthScheduleRule[]
   vpnEnabled: boolean
   vpnKillSwitch: boolean
@@ -115,11 +150,7 @@ export type Settings = {
   arrEndpoints: ArrEndpoint[]
 }
 
-export type HealthReason =
-  | 'metadataTimeout'
-  | 'noPeers'
-  | 'stalledWithPeers'
-  | 'awaitingRecheck'
+export type HealthReason = RecoveryTrigger
 
 export type HealthIssue = {
   infoHash: string
@@ -134,6 +165,7 @@ export type PostProcessorRecord = {
   infoHash: string
   name: string
   stage: string
+  canRetry: boolean
   lastUpdated: number
   category?: string
   message?: string
@@ -144,6 +176,19 @@ export type SeedingEnforcement = {
   name: string
   reason: string
   action: SeedLimitAction
+  timestamp: number
+}
+
+export type RecoverySource = 'automatic' | 'manual'
+
+export type RecoveryRecord = {
+  infoHash: string
+  name: string
+  reason: RecoveryTrigger
+  action: RecoveryAction
+  source: RecoverySource
+  success: boolean
+  message: string
   timestamp: number
 }
 
@@ -301,6 +346,7 @@ export const api = {
       minimumSeedTimeMinutes: response.minimumSeedTimeMinutes ?? 60,
       healthStallMinutes: response.healthStallMinutes ?? 30,
       healthReannounceOnStall: response.healthReannounceOnStall ?? true,
+      recoveryRules: response.recoveryRules ?? [],
       bandwidthSchedule: response.bandwidthSchedule ?? [],
       vpnEnabled: response.vpnEnabled ?? false,
       vpnKillSwitch: response.vpnKillSwitch ?? true,
@@ -320,6 +366,7 @@ export const api = {
       webUIPassword: settings.webUIPassword?.trim() ? settings.webUIPassword : undefined,
       globalMaxRatio: settings.globalMaxRatio,
       globalMaxSeedingTimeMinutes: settings.globalMaxSeedingTimeMinutes,
+      recoveryRules: settings.recoveryRules,
       bandwidthSchedule: settings.bandwidthSchedule,
       vpnEnabled: settings.vpnEnabled,
       vpnKillSwitch: settings.vpnKillSwitch,
@@ -330,6 +377,40 @@ export const api = {
       diskSpaceMonitorPath: settings.diskSpaceMonitorPath,
       arrReSearchAfterHours: settings.arrReSearchAfterHours,
       arrEndpoints: settings.arrEndpoints,
+    })
+  },
+
+  async exportBackup(includeSecrets: boolean): Promise<{ blob: Blob; filename: string }> {
+    const res = await request(`/api/controllarr/backup?includeSecrets=${includeSecrets}`)
+    const disposition = res.headers.get('Content-Disposition') ?? ''
+    const filename =
+      disposition.match(/filename=\"([^\"]+)\"/)?.[1]
+      ?? `controllarr-backup-${new Date().toISOString()}.json`
+    return {
+      blob: await res.blob(),
+      filename,
+    }
+  },
+
+  async importBackup(file: File): Promise<BackupImportResult> {
+    return json<BackupImportResult>('/api/controllarr/backup/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: await file.text(),
+    })
+  },
+
+  async recovery(): Promise<RecoveryRecord[]> {
+    return json<RecoveryRecord[]>('/api/controllarr/recovery')
+  },
+
+  async runRecovery(hash: string, action?: RecoveryAction): Promise<RecoveryRecord> {
+    const fields: Record<string, string> = { hash }
+    if (action) fields.action = action
+    return json<RecoveryRecord>('/api/controllarr/recovery/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(fields).toString(),
     })
   },
 
@@ -345,6 +426,14 @@ export const api = {
     return json<PostProcessorRecord[]>('/api/controllarr/postprocessor')
   },
 
+  async retryPostProcessor(hash: string): Promise<PostProcessorRecord> {
+    return json<PostProcessorRecord>('/api/controllarr/postprocessor/retry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ hash }).toString(),
+    })
+  },
+
   async seeding(): Promise<SeedingEnforcement[]> {
     return json<SeedingEnforcement[]>('/api/controllarr/seeding')
   },
@@ -355,6 +444,12 @@ export const api = {
 
   async diskSpace(): Promise<DiskSpaceStatus> {
     return json<DiskSpaceStatus>('/api/controllarr/diskspace')
+  },
+
+  async recheckDiskSpace(): Promise<DiskSpaceStatus> {
+    return json<DiskSpaceStatus>('/api/controllarr/diskspace/recheck', {
+      method: 'POST',
+    })
   },
 
   async arrNotifications(): Promise<ArrNotification[]> {

@@ -44,6 +44,7 @@ final class RuntimeViewModel {
     var diskSpaceStatus: DiskSpaceMonitor.Status?
     var vpnStatus: VPNMonitor.Status?
     var arrNotifications: [ArrNotifier.Notification] = []
+    var recoveryRecords: [RecoveryCenter.Record] = []
 
     // MARK: - Runtime
 
@@ -61,6 +62,11 @@ final class RuntimeViewModel {
             try await rt.start()
             isBooting = false
             startPolling()
+            // Drain any .torrent files or magnet: links that arrived
+            // while the runtime was still booting.
+            if let delegate = NSApp.delegate as? AppDelegate {
+                delegate.drainPendingOpens()
+            }
         } catch {
             bootError = "\(error)"
             isBooting = false
@@ -94,6 +100,7 @@ final class RuntimeViewModel {
         let dsm = runtime.diskSpaceMonitor
         let vpn = runtime.vpnMonitor
         let an = runtime.arrNotifier
+        let rc = runtime.recoveryCenter
 
         async let t = engine.pollStats()
         async let s = engine.sessionStats()
@@ -105,6 +112,7 @@ final class RuntimeViewModel {
         async let ds = dsm.snapshot()
         async let vp = vpn.snapshot()
         async let ar = an.snapshot()
+        async let rr = rc.snapshot()
         let log = await logger.snapshot(limit: 200)
 
         self.torrents = await t
@@ -117,6 +125,7 @@ final class RuntimeViewModel {
         self.diskSpaceStatus = await ds
         self.vpnStatus = await vp
         self.arrNotifications = await ar
+        self.recoveryRecords = await rr
         self.logEntries = log
     }
 
@@ -125,6 +134,12 @@ final class RuntimeViewModel {
     func addMagnet(_ uri: String, category: String?) async throws {
         guard let runtime else { return }
         _ = try await runtime.engine.addMagnet(uri, category: category)
+        await refresh()
+    }
+
+    func addTorrentFile(at url: URL, category: String?) async throws {
+        guard let runtime else { return }
+        _ = try await runtime.engine.addTorrentFile(at: url, category: category)
         await refresh()
     }
 
@@ -178,6 +193,37 @@ final class RuntimeViewModel {
     func clearHealthIssue(hash: String) async {
         guard let runtime else { return }
         await runtime.healthMonitor.clearIssue(hash: hash)
+        await refresh()
+    }
+
+    func runRecovery(hash: String, action: RecoveryAction? = nil) async throws {
+        guard let runtime else { return }
+        _ = try await runtime.recoveryCenter.runRecovery(for: hash, action: action)
+        await refresh()
+    }
+
+    func retryPostProcessor(hash: String) async throws {
+        guard let runtime else { return }
+        _ = try await runtime.postProcessor.retry(infoHash: hash)
+        await refresh()
+    }
+
+    func recheckDiskSpace() async {
+        guard let runtime else { return }
+        await runtime.diskSpaceMonitor.forceEvaluate()
+        await refresh()
+    }
+
+    func exportBackup(includeSecrets: Bool) async -> Data? {
+        guard let runtime else { return nil }
+        let archive = await runtime.store.exportBackup(includeSecrets: includeSecrets)
+        return try? JSONEncoder().encode(archive)
+    }
+
+    func importBackup(data: Data) async throws {
+        guard let runtime else { return }
+        let archive = try JSONDecoder().decode(BackupArchive.self, from: data)
+        _ = try await runtime.store.restoreBackup(archive)
         await refresh()
     }
 

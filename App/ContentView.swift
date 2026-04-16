@@ -8,12 +8,13 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 import TorrentEngine
 import Persistence
 import Services
 
 enum Tab: String, CaseIterable, Identifiable {
-    case torrents, categories, settings, health, postProcessor, seeding, log
+    case torrents, categories, settings, health, recovery, postProcessor, seeding, arr, log
     var id: String { rawValue }
 
     var title: String {
@@ -22,8 +23,10 @@ enum Tab: String, CaseIterable, Identifiable {
         case .categories:    return "Categories"
         case .settings:      return "Settings"
         case .health:        return "Health"
+        case .recovery:      return "Recovery"
         case .postProcessor: return "Post-Processor"
         case .seeding:       return "Seeding"
+        case .arr:           return "*arr Activity"
         case .log:           return "Log"
         }
     }
@@ -34,8 +37,10 @@ enum Tab: String, CaseIterable, Identifiable {
         case .categories:    return "folder"
         case .settings:      return "gearshape"
         case .health:        return "heart.text.square"
+        case .recovery:      return "arrow.counterclockwise"
         case .postProcessor: return "shippingbox"
         case .seeding:       return "leaf"
+        case .arr:           return "antenna.radiowaves.left.and.right"
         case .log:           return "text.alignleft"
         }
     }
@@ -77,8 +82,10 @@ struct ContentView: View {
                     case .categories:    CategoriesView(vm: vm)
                     case .settings:      SettingsView(vm: vm)
                     case .health:        HealthView(vm: vm)
+                    case .recovery:      RecoveryView(vm: vm)
                     case .postProcessor: PostProcessorView(vm: vm)
                     case .seeding:       SeedingView(vm: vm)
+                    case .arr:           ArrView(vm: vm)
                     case .log:           LogView(vm: vm)
                     }
                 }
@@ -158,6 +165,7 @@ struct TorrentsView: View {
     @State private var addCategory: String = ""
     @State private var addError: String?
     @State private var selectedHash: String?
+    @State private var dropTargeted = false
 
     var body: some View {
         VSplitView {
@@ -212,6 +220,12 @@ struct TorrentsView: View {
                         Label("Add Magnet", systemImage: "plus")
                     }
 
+                    Button {
+                        openTorrentFilePicker()
+                    } label: {
+                        Label("Add .torrent", systemImage: "doc.badge.plus")
+                    }
+
                     if let hash = selectedHash, let t = vm.torrents.first(where: { $0.infoHash == hash }) {
                         Button {
                             Task { t.paused ? await vm.resume(hash: hash) : await vm.pause(hash: hash) }
@@ -253,9 +267,75 @@ struct TorrentsView: View {
                     .frame(minHeight: 180, idealHeight: 260)
             }
         }
+        .overlay {
+            if dropTargeted {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(.blue.opacity(0.08))
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(.blue, style: StrokeStyle(lineWidth: 2, dash: [8, 4]))
+                    VStack(spacing: 8) {
+                        Image(systemName: "doc.badge.plus")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.blue)
+                        Text("Drop .torrent files here")
+                            .font(.title3).foregroundStyle(.blue)
+                    }
+                }
+                .padding(4)
+                .allowsHitTesting(false)
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+            handleDrop(providers)
+        }
         .sheet(isPresented: $addOpen) {
             addMagnetSheet
                 .frame(minWidth: 460, minHeight: 220)
+        }
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        var handled = false
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                handled = true
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                    guard let data = item as? Data,
+                          let url = URL(dataRepresentation: data, relativeTo: nil),
+                          url.pathExtension.lowercased() == "torrent" else { return }
+                    Task { @MainActor in
+                        do {
+                            try await vm.addTorrentFile(at: url, category: nil)
+                        } catch {
+                            NSLog("[Controllarr] Drop add failed: \(error)")
+                        }
+                    }
+                }
+            }
+        }
+        return handled
+    }
+
+    private func openTorrentFilePicker() {
+        let panel = NSOpenPanel()
+        panel.title = "Select .torrent files"
+        panel.allowedContentTypes = [
+            UTType(filenameExtension: "torrent") ?? .data
+        ]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.begin { response in
+            guard response == .OK else { return }
+            for url in panel.urls {
+                Task {
+                    do {
+                        try await vm.addTorrentFile(at: url, category: nil)
+                    } catch {
+                        NSLog("[Controllarr] File picker add failed: \(error)")
+                    }
+                }
+            }
         }
     }
 
@@ -733,6 +813,11 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.orange)
                         }
+                        Spacer()
+                        Button("Recheck now") {
+                            Task { await vm.recheckDiskSpace() }
+                        }
+                        .controlSize(.small)
                     }
                 }
             }
@@ -762,6 +847,14 @@ struct SettingsView: View {
                     }
                 }
             }
+            RecoveryRulesSection(rules: Binding(
+                get: { (draft ?? vm.settings).recoveryRules },
+                set: {
+                    if draft == nil { draft = vm.settings }
+                    draft?.recoveryRules = $0
+                }
+            ))
+            BackupRestoreSection(vm: vm)
             Section {
                 HStack {
                     Button("Save") {
@@ -851,10 +944,20 @@ struct HealthView: View {
                         Text(i.firstSeen, style: .relative).font(.caption)
                     }.width(min: 110, ideal: 130)
                     TableColumn("") { i in
-                        Button("Clear") {
-                            Task { await vm.clearHealthIssue(hash: i.infoHash) }
+                        HStack(spacing: 6) {
+                            Button("Recover") {
+                                Task {
+                                    try? await vm.runRecovery(hash: i.infoHash)
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            Button("Clear") {
+                                Task { await vm.clearHealthIssue(hash: i.infoHash) }
+                            }
+                            .controlSize(.small)
                         }
-                    }.width(min: 70, ideal: 80)
+                    }.width(min: 150, ideal: 170)
                 }
             }
         }
@@ -897,6 +1000,15 @@ struct PostProcessorView: View {
                 TableColumn("Updated") { r in
                     Text(r.lastUpdated, style: .relative).font(.caption)
                 }.width(min: 100, ideal: 120)
+                TableColumn("") { r in
+                    if case .failed = r.stage {
+                        Button("Retry") {
+                            Task { try? await vm.retryPostProcessor(hash: r.infoHash) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }.width(min: 70, ideal: 80)
             })
         }
     }
@@ -1000,6 +1112,278 @@ struct LogView: View {
         case .info:  return .blue
         case .warn:  return .orange
         case .error: return .red
+        }
+    }
+}
+
+// MARK: - Recovery tab
+
+struct RecoveryView: View {
+    @Bindable var vm: RuntimeViewModel
+    var body: some View {
+        if vm.recoveryRecords.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "arrow.counterclockwise").font(.largeTitle).foregroundStyle(.secondary)
+                Text("No recovery actions yet").foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            Table(vm.recoveryRecords) {
+                TableColumn("Torrent") { r in
+                    Text(r.name).lineLimit(1).truncationMode(.middle)
+                }
+                TableColumn("Reason") { r in
+                    Text(triggerLabel(r.reason)).font(.caption)
+                }.width(min: 120, ideal: 140)
+                TableColumn("Action") { r in
+                    Text(actionLabel(r.action)).font(.caption)
+                }.width(min: 100, ideal: 120)
+                TableColumn("Source") { r in
+                    Text(r.source.rawValue)
+                        .font(.caption)
+                        .foregroundStyle(r.source == .manual ? .blue : .secondary)
+                }.width(min: 70, ideal: 80)
+                TableColumn("Result") { r in
+                    HStack(spacing: 4) {
+                        Image(systemName: r.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(r.success ? .green : .red)
+                        Text(r.message).font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.tail)
+                    }
+                }.width(min: 180, ideal: 220)
+                TableColumn("When") { r in
+                    Text(r.timestamp, style: .relative).font(.caption)
+                }.width(min: 100, ideal: 120)
+            }
+        }
+    }
+
+    private func triggerLabel(_ t: RecoveryTrigger) -> String {
+        switch t {
+        case .metadataTimeout:              return "Metadata timeout"
+        case .noPeers:                      return "No peers"
+        case .stalledWithPeers:             return "Stalled (peers)"
+        case .awaitingRecheck:              return "Awaiting recheck"
+        case .postProcessMoveFailed:        return "PP move failed"
+        case .postProcessExtractionFailed:  return "PP extraction failed"
+        case .diskPressure:                 return "Disk pressure"
+        }
+    }
+
+    private func actionLabel(_ a: RecoveryAction) -> String {
+        switch a {
+        case .reannounce:         return "Reannounce"
+        case .pause:              return "Pause"
+        case .removeKeepFiles:    return "Remove (keep)"
+        case .removeDeleteFiles:  return "Remove (delete)"
+        case .retryPostProcess:   return "Retry PP"
+        }
+    }
+}
+
+// MARK: - *arr Activity tab
+
+struct ArrView: View {
+    @Bindable var vm: RuntimeViewModel
+    var body: some View {
+        if vm.arrNotifications.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "antenna.radiowaves.left.and.right").font(.largeTitle).foregroundStyle(.secondary)
+                Text("No *arr re-search activity yet").foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            Table(vm.arrNotifications) {
+                TableColumn("Torrent") { n in
+                    Text(n.name).lineLimit(1).truncationMode(.middle)
+                }
+                TableColumn("Endpoint") { n in
+                    Text(n.endpoint).font(.caption)
+                }.width(min: 100, ideal: 120)
+                TableColumn("Result") { n in
+                    HStack(spacing: 4) {
+                        Image(systemName: n.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(n.success ? .green : .red)
+                        Text(n.message).font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.tail)
+                    }
+                }.width(min: 200, ideal: 260)
+                TableColumn("When") { n in
+                    Text(n.timestamp, style: .relative).font(.caption)
+                }.width(min: 100, ideal: 120)
+            }
+        }
+    }
+}
+
+// MARK: - Recovery rules editor (in Settings)
+
+private struct RecoveryRulesSection: View {
+    @Binding var rules: [RecoveryRule]
+
+    var body: some View {
+        Section("Recovery rules") {
+            if rules.isEmpty {
+                Text("No recovery rules configured. Add a rule to automatically react to unhealthy torrents.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(rules.enumerated()), id: \.offset) { idx, rule in
+                    HStack(spacing: 8) {
+                        Toggle("", isOn: Binding(
+                            get: { rules[idx].enabled },
+                            set: { rules[idx].enabled = $0 }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+
+                        Picker("Trigger", selection: Binding(
+                            get: { rules[idx].trigger },
+                            set: { rules[idx].trigger = $0 }
+                        )) {
+                            ForEach(RecoveryTrigger.allCases, id: \.rawValue) { t in
+                                Text(friendlyTrigger(t)).tag(t)
+                            }
+                        }
+                        .frame(maxWidth: 180)
+
+                        Image(systemName: "arrow.right")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Picker("Action", selection: Binding(
+                            get: { rules[idx].action },
+                            set: { rules[idx].action = $0 }
+                        )) {
+                            ForEach(RecoveryAction.allCases, id: \.rawValue) { a in
+                                Text(friendlyAction(a)).tag(a)
+                            }
+                        }
+                        .frame(maxWidth: 160)
+
+                        Stepper(value: Binding(
+                            get: { rules[idx].delayMinutes },
+                            set: { rules[idx].delayMinutes = $0 }
+                        ), in: 0...1440, step: 5) {
+                            Text("after \(rules[idx].delayMinutes) min").font(.caption).monospacedDigit()
+                        }
+                        .frame(maxWidth: 170)
+
+                        Button(role: .destructive) {
+                            rules.remove(at: idx)
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+            Button {
+                rules.append(RecoveryRule(
+                    enabled: true,
+                    trigger: .stalledWithPeers,
+                    action: .reannounce,
+                    delayMinutes: 30
+                ))
+            } label: {
+                Label("Add Rule", systemImage: "plus")
+            }
+        }
+    }
+
+    private func friendlyTrigger(_ t: RecoveryTrigger) -> String {
+        switch t {
+        case .metadataTimeout:              return "Metadata timeout"
+        case .noPeers:                      return "No peers"
+        case .stalledWithPeers:             return "Stalled (with peers)"
+        case .awaitingRecheck:              return "Awaiting recheck"
+        case .postProcessMoveFailed:        return "Post-process move failed"
+        case .postProcessExtractionFailed:  return "Post-process extraction failed"
+        case .diskPressure:                 return "Disk pressure"
+        }
+    }
+
+    private func friendlyAction(_ a: RecoveryAction) -> String {
+        switch a {
+        case .reannounce:         return "Reannounce"
+        case .pause:              return "Pause"
+        case .removeKeepFiles:    return "Remove (keep files)"
+        case .removeDeleteFiles:  return "Remove (delete files)"
+        case .retryPostProcess:   return "Retry post-process"
+        }
+    }
+}
+
+// MARK: - Backup & Restore (in Settings)
+
+private struct BackupRestoreSection: View {
+    @Bindable var vm: RuntimeViewModel
+    @State private var includeSecrets = false
+    @State private var backupMessage: String?
+    @State private var importMessage: String?
+
+    var body: some View {
+        Section("Backup & Restore") {
+            HStack {
+                Toggle("Include secrets (passwords, API keys)", isOn: $includeSecrets)
+                Spacer()
+                Button("Export Backup") {
+                    Task { await exportBackup() }
+                }
+            }
+            if let msg = backupMessage {
+                Text(msg).font(.caption).foregroundStyle(.secondary)
+            }
+            HStack {
+                Button("Import Backup") {
+                    importBackup()
+                }
+                if let msg = importMessage {
+                    Text(msg).font(.caption).foregroundStyle(msg.contains("Error") ? .red : .secondary)
+                }
+            }
+        }
+    }
+
+    private func exportBackup() async {
+        guard let data = await vm.exportBackup(includeSecrets: includeSecrets) else {
+            backupMessage = "Failed to create backup."
+            return
+        }
+        let panel = NSSavePanel()
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        panel.nameFieldStringValue = "controllarr-backup-\(timestamp).json"
+        panel.allowedContentTypes = [.json]
+        let response = panel.runModal()
+        if response == .OK, let url = panel.url {
+            do {
+                try data.write(to: url)
+                backupMessage = "Backup exported to \(url.lastPathComponent)."
+            } catch {
+                backupMessage = "Error writing backup: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func importBackup() {
+        let panel = NSOpenPanel()
+        panel.title = "Select Controllarr backup"
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.urls.first else { return }
+            Task {
+                do {
+                    let data = try Data(contentsOf: url)
+                    try await vm.importBackup(data: data)
+                    importMessage = "Backup restored from \(url.lastPathComponent)."
+                } catch {
+                    importMessage = "Error: \(error.localizedDescription)"
+                }
+            }
         }
     }
 }

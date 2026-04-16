@@ -48,6 +48,23 @@ public actor PostProcessor {
         public var lastUpdated: Date
     }
 
+    public enum Error: Swift.Error, LocalizedError {
+        case recordNotFound(String)
+        case torrentNotFound(String)
+        case recordNotRetryable(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .recordNotFound(let hash):
+                return "No post-processor record found for \(hash)."
+            case .torrentNotFound(let hash):
+                return "No torrent is currently loaded for \(hash)."
+            case .recordNotRetryable(let hash):
+                return "Post-processing for \(hash) is not in a retryable state."
+            }
+        }
+    }
+
     private let engine: TorrentEngine
     private let store: PersistenceStore
     private let logger: Logger
@@ -65,6 +82,30 @@ public actor PostProcessor {
 
     public func record(for hash: String) -> Record? {
         records[hash]
+    }
+
+    public func retry(infoHash hash: String) async throws -> Record {
+        guard let existing = records[hash] else {
+            throw Error.recordNotFound(hash)
+        }
+        guard Self.isRetryable(stage: existing.stage) else {
+            throw Error.recordNotRetryable(hash)
+        }
+
+        let torrents = await engine.pollStats()
+        guard let torrent = torrents.first(where: { $0.infoHash == hash }) else {
+            throw Error.torrentNotFound(hash)
+        }
+
+        var record = existing
+        record.stage = .pending
+        record.message = "manual retry requested"
+        record.lastUpdated = Date()
+        records[hash] = record
+        logger.info("post-processor", "manual retry queued for \(record.name)")
+
+        await advance(torrent: torrent)
+        return records[hash] ?? record
     }
 
     /// Advance the state machine for every torrent the engine currently
@@ -235,6 +276,13 @@ public actor PostProcessor {
         r.message = reason
         r.lastUpdated = Date()
         records[hash] = r
+    }
+
+    public static func isRetryable(stage: Stage) -> Bool {
+        if case .failed = stage {
+            return true
+        }
+        return false
     }
 
     /// Walk `root` and return every file whose extension (case-insensitive)

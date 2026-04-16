@@ -1,6 +1,7 @@
 import { startTransition, useCallback, useDeferredValue, useEffect, useState, type FormEvent } from 'react'
 import {
   api,
+  type BackupImportResult,
   fetchFiles,
   fetchTrackers,
   fetchPeers,
@@ -13,6 +14,9 @@ import {
   type HealthIssue,
   type LogEntry,
   type PostProcessorRecord,
+  type RecoveryAction,
+  type RecoveryRecord,
+  type RecoveryRule,
   type SeedLimitAction,
   type SeedingEnforcement,
   type SessionStats,
@@ -35,6 +39,7 @@ type TabId =
   | 'categories'
   | 'settings'
   | 'health'
+  | 'recovery'
   | 'postprocessor'
   | 'seeding'
   | 'log'
@@ -50,6 +55,7 @@ type LiveSnapshot = {
   stats: SessionStats | null
   categories: Category[]
   health: HealthIssue[]
+  recovery: RecoveryRecord[]
   postProcessor: PostProcessorRecord[]
   seeding: SeedingEnforcement[]
   log: LogEntry[]
@@ -81,6 +87,11 @@ const TABS: TabMeta[] = [
     description: 'Review stalled or unhealthy torrents and clear issues once resolved.',
   },
   {
+    id: 'recovery',
+    label: 'Recovery',
+    description: 'Track automatic playbooks, manual recoveries, and recovery rule outcomes.',
+  },
+  {
     id: 'postprocessor',
     label: 'Post-Processor',
     description: 'See completed torrents moving, extracting, and landing in their final destination.',
@@ -102,6 +113,7 @@ const EMPTY_SNAPSHOT: LiveSnapshot = {
   stats: null,
   categories: [],
   health: [],
+  recovery: [],
   postProcessor: [],
   seeding: [],
   log: [],
@@ -150,6 +162,7 @@ export function App() {
           api.stats(),
           api.categories(),
           api.health(),
+          api.recovery(),
           api.postProcessor(),
           api.seeding(),
           api.log(500),
@@ -164,6 +177,7 @@ export function App() {
           stats,
           categories,
           health,
+          recovery,
           postProcessor,
           seeding,
           log,
@@ -176,6 +190,7 @@ export function App() {
             stats,
             categories: sortedCopy(categories, (a, b) => a.name.localeCompare(b.name)),
             health: sortedCopy(health, (a, b) => b.lastUpdated - a.lastUpdated),
+            recovery: sortedCopy(recovery, (a, b) => b.timestamp - a.timestamp),
             postProcessor: sortedCopy(postProcessor, (a, b) => b.lastUpdated - a.lastUpdated),
             seeding: sortedCopy(seeding, (a, b) => b.timestamp - a.timestamp),
             log: sortedCopy(log, (a, b) => b.timestamp - a.timestamp),
@@ -332,6 +347,49 @@ export function App() {
     setSettingsMessage(null)
   }
 
+  async function exportBackup(includeSecrets: boolean) {
+    try {
+      setIsLoading(true)
+      const { blob, filename } = await api.exportBackup(includeSecrets)
+      const objectURL = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = objectURL
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(objectURL)
+      setSettingsMessage(includeSecrets ? 'Backup downloaded with secrets' : 'Backup downloaded')
+      setError(null)
+    } catch (backupError: unknown) {
+      setError(backupError instanceof Error ? backupError.message : String(backupError))
+      throw backupError
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function importBackup(file: File): Promise<BackupImportResult> {
+    try {
+      setIsLoading(true)
+      const result = await api.importBackup(file)
+      setSettingsDirty(false)
+      setSettingsMessage(
+        result.restartRecommended
+          ? 'Backup imported. Restart recommended for host/port changes.'
+          : 'Backup imported',
+      )
+      setError(null)
+      await refreshAll(true, true)
+      return result
+    } catch (backupError: unknown) {
+      setError(backupError instanceof Error ? backupError.message : String(backupError))
+      throw backupError
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   async function saveCategory(category: Category) {
     try {
       await api.saveCategory(category)
@@ -358,6 +416,25 @@ export function App() {
     await runAction(async () => {
       await api.clearHealthIssue(hash)
     })
+  }
+
+  async function runRecovery(hash: string) {
+    await runAction(
+      async () => {
+        await api.runRecovery(hash)
+      },
+      { refreshAll: true, silent: false },
+    )
+  }
+
+  async function retryPostProcessing(hash: string) {
+    await runAction(
+      async () => {
+        await api.retryPostProcessor(hash)
+        setSettingsMessage('Post-processing retry queued')
+      },
+      { silent: false },
+    )
   }
 
   if (!authed) {
@@ -515,15 +592,28 @@ export function App() {
                     onSave={saveSettings}
                     onRevert={revertSettings}
                     onCyclePort={() => void runAction(() => api.cyclePort(), { silent: false })}
+                    onExportBackup={exportBackup}
+                    onImportBackup={importBackup}
                   />
                 )}
 
                 {activeTab === 'health' && (
-                  <HealthTab issues={snapshot.health} onClear={(hash) => void clearHealth(hash)} />
+                  <HealthTab
+                    issues={snapshot.health}
+                    onClear={(hash) => void clearHealth(hash)}
+                    onRecover={(hash) => void runRecovery(hash)}
+                  />
+                )}
+
+                {activeTab === 'recovery' && (
+                  <RecoveryTab records={snapshot.recovery} />
                 )}
 
                 {activeTab === 'postprocessor' && (
-                  <PostProcessorTab records={snapshot.postProcessor} />
+                  <PostProcessorTab
+                    records={snapshot.postProcessor}
+                    onRetry={(hash) => void retryPostProcessing(hash)}
+                  />
                 )}
 
                 {activeTab === 'seeding' && <SeedingTab records={snapshot.seeding} />}
@@ -1090,6 +1180,8 @@ function SettingsTab({
   onSave,
   onRevert,
   onCyclePort,
+  onExportBackup,
+  onImportBackup,
 }: {
   settings: Settings
   settingsDirty: boolean
@@ -1097,6 +1189,8 @@ function SettingsTab({
   onSave: (event: FormEvent<HTMLFormElement>) => void
   onRevert: () => void
   onCyclePort: () => void
+  onExportBackup: (includeSecrets: boolean) => Promise<void>
+  onImportBackup: (file: File) => Promise<BackupImportResult>
 }) {
   function patch(patchValues: Partial<Settings>) {
     onChange({ ...settings, ...patchValues })
@@ -1325,6 +1419,11 @@ function SettingsTab({
         </section>
       </div>
 
+      <RecoveryRulesSection
+        rules={settings.recoveryRules}
+        onChange={(rules) => patch({ recoveryRules: rules })}
+      />
+
       <VPNProtectionSection
         vpnEnabled={settings.vpnEnabled}
         vpnKillSwitch={settings.vpnKillSwitch}
@@ -1353,6 +1452,11 @@ function SettingsTab({
         onChange={(rules) => patch({ bandwidthSchedule: rules })}
       />
 
+      <BackupAndRestoreSection
+        onExportBackup={onExportBackup}
+        onImportBackup={onImportBackup}
+      />
+
       <div className="button-row">
         <button className="primary" type="submit">
           Save settings
@@ -1365,9 +1469,271 @@ function SettingsTab({
   )
 }
 
+function BackupAndRestoreSection({
+  onExportBackup,
+  onImportBackup,
+}: {
+  onExportBackup: (includeSecrets: boolean) => Promise<void>
+  onImportBackup: (file: File) => Promise<BackupImportResult>
+}) {
+  const [includeSecrets, setIncludeSecrets] = useState(true)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [fileInputKey, setFileInputKey] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState<{ tone: 'success' | 'error'; message: string } | null>(null)
+
+  async function handleExport() {
+    try {
+      setBusy(true)
+      await onExportBackup(includeSecrets)
+      setStatus({
+        tone: 'success',
+        message: includeSecrets
+          ? 'Downloaded a full backup including Keychain-backed secrets.'
+          : 'Downloaded a redacted backup without secrets.',
+      })
+    } catch (error: unknown) {
+      setStatus({
+        tone: 'error',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleImport() {
+    if (!selectedFile) {
+      setStatus({ tone: 'error', message: 'Choose a backup file before importing.' })
+      return
+    }
+
+    const confirmed = window.confirm(
+      'Importing a backup replaces the current settings and categories. Continue?',
+    )
+    if (!confirmed) return
+
+    try {
+      setBusy(true)
+      const result = await onImportBackup(selectedFile)
+      setSelectedFile(null)
+      setFileInputKey((current) => current + 1)
+      setStatus({
+        tone: 'success',
+        message: result.restartRecommended
+          ? 'Backup imported. Restart recommended to apply HTTP binding changes.'
+          : 'Backup imported successfully.',
+      })
+    } catch (error: unknown) {
+      setStatus({
+        tone: 'error',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="form-panel">
+      <div className="form-panel-header">
+        <h3>Backup &amp; restore</h3>
+        <p>Export the full Controllarr state or restore it on this machine.</p>
+      </div>
+
+      <div className="form-grid">
+        <label className="toggle-field">
+          <span>Include Keychain secrets in exports</span>
+          <input
+            type="checkbox"
+            checked={includeSecrets}
+            onChange={(event) => setIncludeSecrets(event.currentTarget.checked)}
+          />
+        </label>
+
+        <label className="field wide">
+          <span>Restore from backup JSON</span>
+          <input
+            key={fileInputKey}
+            type="file"
+            accept="application/json,.json"
+            onChange={(event) => setSelectedFile(event.currentTarget.files?.[0] ?? null)}
+          />
+        </label>
+      </div>
+
+      <div className="button-row">
+        <button type="button" onClick={() => void handleExport()} disabled={busy}>
+          Export backup
+        </button>
+        <button
+          type="button"
+          className="primary"
+          onClick={() => void handleImport()}
+          disabled={busy || !selectedFile}
+        >
+          Import backup
+        </button>
+      </div>
+
+      {status && <Banner tone={status.tone} message={status.message} />}
+    </section>
+  )
+}
+
+function RecoveryRulesSection({
+  rules,
+  onChange,
+}: {
+  rules: RecoveryRule[]
+  onChange: (rules: RecoveryRule[]) => void
+}) {
+  function patchRule(index: number, patchValues: Partial<RecoveryRule>) {
+    onChange(rules.map((rule, currentIndex) => (
+      currentIndex === index ? { ...rule, ...patchValues } : rule
+    )))
+  }
+
+  function addRule() {
+    const usedTriggers = new Set(rules.map((rule) => rule.trigger))
+    const nextTrigger = RECOVERY_TRIGGER_OPTIONS.find((option) => !usedTriggers.has(option))
+      ?? 'metadata_timeout'
+    onChange([
+      ...rules,
+      {
+        enabled: false,
+        trigger: nextTrigger,
+        action: 'reannounce',
+        delayMinutes: 15,
+      },
+    ])
+  }
+
+  function removeRule(index: number) {
+    onChange(rules.filter((_, currentIndex) => currentIndex !== index))
+  }
+
+  return (
+    <section className="form-panel">
+      <div className="form-panel-header">
+        <h3>Recovery rules</h3>
+        <p>Only the first enabled rule per health reason runs automatically; manual recovery is always available.</p>
+      </div>
+
+      {rules.length === 0 ? (
+        <EmptyState
+          title="No recovery rules configured"
+          body="Add a rule to automatically reannounce, pause, or remove torrents that stay unhealthy."
+        />
+      ) : (
+        <div className="section-stack">
+          {rules.map((rule, index) => (
+            <div
+              className="form-panel"
+              style={{ background: 'rgba(8, 20, 27, 0.55)' }}
+              key={`${rule.trigger}-${rule.action}-${rule.delayMinutes}-${index}`}
+            >
+              <div className="form-grid">
+                <label className="toggle-field">
+                  <span>Enabled</span>
+                  <input
+                    type="checkbox"
+                    checked={rule.enabled}
+                    onChange={(event) => patchRule(index, { enabled: event.currentTarget.checked })}
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Trigger</span>
+                  <select
+                    value={rule.trigger}
+                    onChange={(event) =>
+                      patchRule(index, { trigger: event.target.value as RecoveryRule['trigger'] })
+                    }
+                  >
+                    {RECOVERY_TRIGGER_OPTIONS.map((trigger) => (
+                      <option key={trigger} value={trigger}>
+                        {friendlyHealthReason(trigger)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span>Action</span>
+                  <select
+                    value={rule.action}
+                    onChange={(event) =>
+                      patchRule(index, { action: event.target.value as RecoveryAction })
+                    }
+                  >
+                    {RECOVERY_ACTION_OPTIONS.map((action) => (
+                      <option key={action} value={action}>
+                        {friendlyRecoveryAction(action)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span>Delay (min)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={5}
+                    value={rule.delayMinutes}
+                    onChange={(event) =>
+                      patchRule(index, {
+                        delayMinutes: Math.max(
+                          0,
+                          readNumber(event.currentTarget.valueAsNumber, rule.delayMinutes),
+                        ),
+                      })
+                    }
+                  />
+                </label>
+              </div>
+
+              <div className="button-row">
+                <button type="button" className="danger" onClick={() => removeRule(index)}>
+                  Remove rule
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="button-row">
+        <button type="button" onClick={addRule}>
+          Add recovery rule
+        </button>
+      </div>
+    </section>
+  )
+}
+
 const DAY_LABELS: Record<number, string> = {
   1: 'Sun', 2: 'Mon', 3: 'Tue', 4: 'Wed', 5: 'Thu', 6: 'Fri', 7: 'Sat',
 }
+
+const RECOVERY_TRIGGER_OPTIONS: RecoveryRule['trigger'][] = [
+  'metadata_timeout',
+  'no_peers',
+  'stalled_with_peers',
+  'awaiting_recheck',
+  'post_process_move_failed',
+  'post_process_extraction_failed',
+  'disk_pressure',
+]
+
+const RECOVERY_ACTION_OPTIONS: RecoveryAction[] = [
+  'reannounce',
+  'pause',
+  'remove_keep_files',
+  'remove_delete_files',
+  'retry_post_process',
+]
 
 function emptyScheduleRule(): BandwidthScheduleRule {
   return {
@@ -1516,6 +1882,7 @@ function DiskSpaceMonitorSection({
   onMonitorPathChange: (value: string) => void
 }) {
   const [diskSpace, setDiskSpace] = useState<DiskSpaceStatus | null>(null)
+  const [isRechecking, setIsRechecking] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -1536,6 +1903,18 @@ function DiskSpaceMonitorSection({
       window.clearInterval(interval)
     }
   }, [])
+
+  async function recheckNow() {
+    try {
+      setIsRechecking(true)
+      const status = await api.recheckDiskSpace()
+      setDiskSpace(status)
+    } catch {
+      // best-effort
+    } finally {
+      setIsRechecking(false)
+    }
+  }
 
   const enabled = diskSpaceMinimumGB !== null
 
@@ -1585,6 +1964,12 @@ function DiskSpaceMonitorSection({
 
       {diskSpace && (
         <div className="form-grid" style={{ marginTop: '0.75rem' }}>
+          <div className="field wide">
+            <span style={{ fontSize: '0.88rem', color: 'var(--muted)', display: 'block', marginBottom: '0.25rem' }}>
+              Monitored path
+            </span>
+            <strong className="mono-cell">{diskSpace.monitorPath || '—'}</strong>
+          </div>
           <div className="field">
             <span style={{ fontSize: '0.88rem', color: 'var(--muted)', display: 'block', marginBottom: '0.25rem' }}>
               Current free space
@@ -1607,6 +1992,32 @@ function DiskSpaceMonitorSection({
                 : 'OK'}
             </span>
           </div>
+          <div className="field">
+            <span style={{ fontSize: '0.88rem', color: 'var(--muted)', display: 'block', marginBottom: '0.25rem' }}>
+              Operator action
+            </span>
+            <button type="button" onClick={() => void recheckNow()} disabled={isRechecking}>
+              {isRechecking ? 'Rechecking...' : 'Recheck now'}
+            </button>
+          </div>
+          {diskSpace.shortfallBytes > 0 && (
+            <div className="field wide">
+              <span style={{ fontSize: '0.88rem', color: 'var(--muted)', display: 'block', marginBottom: '0.25rem' }}>
+                Space still needed
+              </span>
+              <strong>{fmtBytes(diskSpace.shortfallBytes)}</strong>
+            </div>
+          )}
+          {diskSpace.pausedHashes.length > 0 && (
+            <div className="field wide">
+              <span style={{ fontSize: '0.88rem', color: 'var(--muted)', display: 'block', marginBottom: '0.25rem' }}>
+                Paused by monitor
+              </span>
+              <code style={{ whiteSpace: 'normal', wordBreak: 'break-all' }}>
+                {diskSpace.pausedHashes.join(', ')}
+              </code>
+            </div>
+          )}
         </div>
       )}
     </section>
@@ -1968,9 +2379,11 @@ function BandwidthScheduleSection({
 function HealthTab({
   issues,
   onClear,
+  onRecover,
 }: {
   issues: HealthIssue[]
   onClear: (hash: string) => void
+  onRecover: (hash: string) => void
 }) {
   return (
     <div className="section-stack">
@@ -2008,9 +2421,14 @@ function HealthTab({
                   <td title={fmtDateTime(issue.firstSeen)}>{fmtRelativeTime(issue.firstSeen)}</td>
                   <td title={fmtDateTime(issue.lastUpdated)}>{fmtRelativeTime(issue.lastUpdated)}</td>
                   <td>
-                    <button type="button" onClick={() => onClear(issue.infoHash)}>
-                      Clear
-                    </button>
+                    <div className="action-cluster">
+                      <button type="button" onClick={() => onRecover(issue.infoHash)}>
+                        Recover now
+                      </button>
+                      <button type="button" onClick={() => onClear(issue.infoHash)}>
+                        Clear
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -2022,13 +2440,75 @@ function HealthTab({
   )
 }
 
-function PostProcessorTab({ records }: { records: PostProcessorRecord[] }) {
+function RecoveryTab({ records }: { records: RecoveryRecord[] }) {
+  return (
+    <div className="section-stack">
+      <header className="section-header">
+        <div>
+          <h2>Recovery</h2>
+          <p>Automatic and manual recovery attempts driven by configured health rules.</p>
+        </div>
+        <div className="section-meta">{records.length} attempts</div>
+      </header>
+
+      {records.length === 0 ? (
+        <EmptyState
+          title="No recovery actions yet"
+          body="Configured rules and manual recoveries will show up here once Controllarr starts responding to unhealthy torrents."
+        />
+      ) : (
+        <div className="table-shell">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Torrent</th>
+                <th>Reason</th>
+                <th>Action</th>
+                <th>Source</th>
+                <th>Status</th>
+                <th>When</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {records.map((record) => (
+                <tr key={`${record.infoHash}-${record.timestamp}-${record.source}`}>
+                  <td className="primary-cell">{record.name}</td>
+                  <td>
+                    <span className="pill amber">{friendlyHealthReason(record.reason)}</span>
+                  </td>
+                  <td>{friendlyRecoveryAction(record.action)}</td>
+                  <td>{record.source === 'automatic' ? 'Automatic' : 'Manual'}</td>
+                  <td>
+                    <span className={`pill ${record.success ? 'green' : 'red'}`}>
+                      {record.success ? 'Applied' : 'Failed'}
+                    </span>
+                  </td>
+                  <td title={fmtDateTime(record.timestamp)}>{fmtRelativeTime(record.timestamp)}</td>
+                  <td>{record.message}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PostProcessorTab({
+  records,
+  onRetry,
+}: {
+  records: PostProcessorRecord[]
+  onRetry: (hash: string) => void
+}) {
   return (
     <div className="section-stack">
       <header className="section-header">
         <div>
           <h2>Post-Processor</h2>
-          <p>Read-only status from the move/extract pipeline behind completed torrents.</p>
+          <p>Move and extraction pipeline for completed torrents, with manual retries for failed records.</p>
         </div>
         <div className="section-meta">{records.length} records</div>
       </header>
@@ -2048,6 +2528,7 @@ function PostProcessorTab({ records }: { records: PostProcessorRecord[] }) {
                 <th>Stage</th>
                 <th>Updated</th>
                 <th>Message</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -2060,6 +2541,15 @@ function PostProcessorTab({ records }: { records: PostProcessorRecord[] }) {
                   </td>
                   <td title={fmtDateTime(record.lastUpdated)}>{fmtRelativeTime(record.lastUpdated)}</td>
                   <td>{record.message || '—'}</td>
+                  <td>
+                    {record.canRetry ? (
+                      <button type="button" onClick={() => onRetry(record.infoHash)}>
+                        Retry
+                      </button>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -2418,6 +2908,8 @@ function countForTab(tab: TabId, snapshot: LiveSnapshot): number {
       return 1
     case 'health':
       return snapshot.health.length
+    case 'recovery':
+      return snapshot.recovery.length
     case 'postprocessor':
       return snapshot.postProcessor.length
     case 'seeding':
@@ -2433,6 +2925,7 @@ function normalizeSettings(settings: Settings): Settings {
     webUIPassword: settings.webUIPassword ?? '',
     globalMaxRatio: settings.globalMaxRatio ?? null,
     globalMaxSeedingTimeMinutes: settings.globalMaxSeedingTimeMinutes ?? null,
+    recoveryRules: settings.recoveryRules ?? [],
     bandwidthSchedule: settings.bandwidthSchedule ?? [],
     diskSpaceMinimumGB: settings.diskSpaceMinimumGB ?? null,
     diskSpaceMonitorPath: settings.diskSpaceMonitorPath ?? '',
@@ -2441,16 +2934,41 @@ function normalizeSettings(settings: Settings): Settings {
   }
 }
 
-function friendlyHealthReason(reason: HealthIssue['reason']): string {
+function friendlyHealthReason(reason: string): string {
   switch (reason) {
-    case 'metadataTimeout':
+    case 'metadata_timeout':
       return 'Metadata timeout'
-    case 'noPeers':
+    case 'no_peers':
       return 'No peers'
-    case 'stalledWithPeers':
+    case 'stalled_with_peers':
       return 'Stalled (with peers)'
-    case 'awaitingRecheck':
+    case 'awaiting_recheck':
       return 'Awaiting recheck'
+    case 'post_process_move_failed':
+      return 'Post-process move failed'
+    case 'post_process_extraction_failed':
+      return 'Post-process extraction failed'
+    case 'disk_pressure':
+      return 'Disk pressure'
+    default:
+      return reason
+  }
+}
+
+function friendlyRecoveryAction(action: string): string {
+  switch (action) {
+    case 'reannounce':
+      return 'Reannounce'
+    case 'pause':
+      return 'Pause'
+    case 'remove_keep_files':
+      return 'Remove (keep files)'
+    case 'remove_delete_files':
+      return 'Remove (delete files)'
+    case 'retry_post_process':
+      return 'Retry post-process'
+    default:
+      return action
   }
 }
 

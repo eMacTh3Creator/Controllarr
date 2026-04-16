@@ -563,6 +563,22 @@ public enum QBittorrentAPI {
                 if let v = dict["minimumSeedTimeMinutes"] as? Int { s.minimumSeedTimeMinutes = v }
                 if let v = dict["healthStallMinutes"]     as? Int { s.healthStallMinutes = v }
                 if let v = dict["healthReannounceOnStall"] as? Bool { s.healthReannounceOnStall = v }
+                if let rules = dict["recoveryRules"] as? [[String: Any]] {
+                    s.recoveryRules = rules.compactMap { rule in
+                        guard let triggerRaw = rule["trigger"] as? String,
+                              let trigger = RecoveryTrigger(rawValue: triggerRaw),
+                              let actionRaw = rule["action"] as? String,
+                              let action = RecoveryAction(rawValue: actionRaw) else {
+                            return nil
+                        }
+                        return RecoveryRule(
+                            enabled: (rule["enabled"] as? Bool) ?? false,
+                            trigger: trigger,
+                            action: action,
+                            delayMinutes: (rule["delayMinutes"] as? Int) ?? 0
+                        )
+                    }
+                }
                 // Bandwidth schedule
                 if let rules = dict["bandwidthSchedule"] as? [[String: Any]] {
                     s.bandwidthSchedule = rules.compactMap { r in
@@ -608,6 +624,65 @@ public enum QBittorrentAPI {
             return plainText("")
         }
 
+        // MARK: Controllarr: backup / restore
+
+        router.get("/api/controllarr/backup") { request, _ -> Response in
+            let query = FormParser.parseQuery(request.uri.query ?? "")
+            let includeSecrets = (query["includeSecrets"]?.lowercased() == "true")
+            let archive = await services.store.exportBackup(includeSecrets: includeSecrets)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            do {
+                let data = try encoder.encode(archive)
+                let formatter = ISO8601DateFormatter()
+                let timestamp = formatter.string(from: archive.createdAt)
+                    .replacingOccurrences(of: ":", with: "-")
+                let filename = "controllarr-backup-\(timestamp).json"
+                services.logger.info(
+                    "backup",
+                    "exported backup (\(includeSecrets ? "with" : "without") secrets)"
+                )
+                return jsonData(
+                    data,
+                    contentDisposition: "attachment; filename=\"\(filename)\""
+                )
+            } catch {
+                services.logger.error("backup", "failed to encode backup: \(error.localizedDescription)")
+                return Response(status: .internalServerError)
+            }
+        }
+        router.post("/api/controllarr/backup/import") { request, _ -> Response in
+            let body = try await request.body.collect(upTo: 10 * 1024 * 1024)
+            let decoder = JSONDecoder()
+            do {
+                let archive = try decoder.decode(BackupArchive.self, from: Data(buffer: body))
+                let result = try await services.store.restoreBackup(archive)
+                services.logger.warn(
+                    "backup",
+                    "imported backup with \(result.categoryCount) categories and \(result.endpointCount) *arr endpoints"
+                )
+                return json([
+                    "restoredAt": result.restoredAt.timeIntervalSince1970,
+                    "categoryCount": result.categoryCount,
+                    "endpointCount": result.endpointCount,
+                    "includedSecrets": result.includedSecrets,
+                    "restartRecommended": result.restartRecommended,
+                ] as [String: Any])
+            } catch let error as BackupError {
+                services.logger.warn("backup", "backup import rejected: \(error.localizedDescription)")
+                return Response(
+                    status: .badRequest,
+                    body: .init(byteBuffer: ByteBuffer(string: error.localizedDescription))
+                )
+            } catch {
+                services.logger.warn("backup", "backup import failed: \(error.localizedDescription)")
+                return Response(
+                    status: .badRequest,
+                    body: .init(byteBuffer: ByteBuffer(string: error.localizedDescription))
+                )
+            }
+        }
+
         // MARK: Controllarr: health
 
         router.get("/api/controllarr/health") { _, _ -> Response in
@@ -632,22 +707,87 @@ public enum QBittorrentAPI {
             return plainText("")
         }
 
+        // MARK: Controllarr: recovery center
+
+        router.get("/api/controllarr/recovery") { _, _ -> Response in
+            let records = await services.recoveryCenter.snapshot()
+            let out: [[String: Any]] = records.map { record in
+                [
+                    "infoHash": record.infoHash,
+                    "name": record.name,
+                    "reason": record.reason.rawValue,
+                    "action": record.action.rawValue,
+                    "source": record.source.rawValue,
+                    "success": record.success,
+                    "message": record.message,
+                    "timestamp": record.timestamp.timeIntervalSince1970,
+                ]
+            }
+            return json(out)
+        }
+        router.post("/api/controllarr/recovery/run") { request, _ -> Response in
+            let form = FormParser.parse(try await request.body.collect(upTo: 64 * 1024))
+            guard let hash = form["hash"], !hash.isEmpty else {
+                return Response(status: .badRequest)
+            }
+            let overrideAction = form["action"].flatMap { RecoveryAction(rawValue: $0) }
+            do {
+                let record = try await services.recoveryCenter.runRecovery(for: hash, action: overrideAction)
+                return json([
+                    "infoHash": record.infoHash,
+                    "name": record.name,
+                    "reason": record.reason.rawValue,
+                    "action": record.action.rawValue,
+                    "source": record.source.rawValue,
+                    "success": record.success,
+                    "message": record.message,
+                    "timestamp": record.timestamp.timeIntervalSince1970,
+                ] as [String: Any])
+            } catch let error as RecoveryCenter.Error {
+                return Response(
+                    status: .notFound,
+                    body: .init(byteBuffer: ByteBuffer(string: error.localizedDescription))
+                )
+            } catch {
+                return Response(
+                    status: .badRequest,
+                    body: .init(byteBuffer: ByteBuffer(string: error.localizedDescription))
+                )
+            }
+        }
+
         // MARK: Controllarr: post-processor
 
         router.get("/api/controllarr/postprocessor") { _, _ -> Response in
             let records = await services.postProcessor.snapshot()
-            let out: [[String: Any]] = records.map { r in
-                var dict: [String: Any] = [
-                    "infoHash": r.infoHash,
-                    "name": r.name,
-                    "stage": stageString(r.stage),
-                    "lastUpdated": r.lastUpdated.timeIntervalSince1970,
-                ]
-                if let c = r.category { dict["category"] = c }
-                if let m = r.message  { dict["message"]  = m }
-                return dict
-            }
+            let out: [[String: Any]] = records.map(postProcessorRecord)
             return json(out)
+        }
+        router.post("/api/controllarr/postprocessor/retry") { request, _ -> Response in
+            let form = FormParser.parse(try await request.body.collect(upTo: 64 * 1024))
+            guard let hash = form["hash"], !hash.isEmpty else {
+                return Response(status: .badRequest)
+            }
+            do {
+                let record = try await services.postProcessor.retry(infoHash: hash)
+                return json(postProcessorRecord(record))
+            } catch let error as PostProcessor.Error {
+                let status: HTTPResponse.Status = switch error {
+                case .recordNotFound, .torrentNotFound:
+                    .notFound
+                case .recordNotRetryable:
+                    .badRequest
+                }
+                return Response(
+                    status: status,
+                    body: .init(byteBuffer: ByteBuffer(string: error.localizedDescription))
+                )
+            } catch {
+                return Response(
+                    status: .badRequest,
+                    body: .init(byteBuffer: ByteBuffer(string: error.localizedDescription))
+                )
+            }
         }
 
         // MARK: Controllarr: seeding enforcement log
@@ -670,12 +810,12 @@ public enum QBittorrentAPI {
 
         router.get("/api/controllarr/diskspace") { _, _ -> Response in
             let status = await services.diskSpaceMonitor.snapshot()
-            return json([
-                "freeBytes": status.freeBytes,
-                "thresholdBytes": status.thresholdBytes,
-                "isPaused": status.isPaused,
-                "pausedCount": status.pausedHashes.count,
-            ] as [String: Any])
+            return json(diskSpaceStatus(status))
+        }
+        router.post("/api/controllarr/diskspace/recheck") { _, _ -> Response in
+            await services.diskSpaceMonitor.forceEvaluate()
+            let status = await services.diskSpaceMonitor.snapshot()
+            return json(diskSpaceStatus(status))
         }
 
         // MARK: Controllarr: VPN monitor
@@ -772,6 +912,14 @@ public enum QBittorrentAPI {
             "minimumSeedTimeMinutes": s.minimumSeedTimeMinutes,
             "healthStallMinutes": s.healthStallMinutes,
             "healthReannounceOnStall": s.healthReannounceOnStall,
+            "recoveryRules": s.recoveryRules.map { rule in
+                [
+                    "enabled": rule.enabled,
+                    "trigger": rule.trigger.rawValue,
+                    "action": rule.action.rawValue,
+                    "delayMinutes": rule.delayMinutes,
+                ] as [String: Any]
+            },
             "vpnEnabled": s.vpnEnabled,
             "vpnKillSwitch": s.vpnKillSwitch,
             "vpnBindInterface": s.vpnBindInterface,
@@ -817,6 +965,31 @@ public enum QBittorrentAPI {
         }
     }
 
+    static func postProcessorRecord(_ record: PostProcessor.Record) -> [String: Any] {
+        var dict: [String: Any] = [
+            "infoHash": record.infoHash,
+            "name": record.name,
+            "stage": stageString(record.stage),
+            "canRetry": PostProcessor.isRetryable(stage: record.stage),
+            "lastUpdated": record.lastUpdated.timeIntervalSince1970,
+        ]
+        if let c = record.category { dict["category"] = c }
+        if let m = record.message { dict["message"] = m }
+        return dict
+    }
+
+    static func diskSpaceStatus(_ status: DiskSpaceMonitor.Status) -> [String: Any] {
+        [
+            "freeBytes": status.freeBytes,
+            "thresholdBytes": status.thresholdBytes,
+            "monitorPath": status.monitorPath,
+            "shortfallBytes": status.shortfallBytes,
+            "isPaused": status.isPaused,
+            "pausedCount": status.pausedHashes.count,
+            "pausedHashes": status.pausedHashes.sorted(),
+        ]
+    }
+
     // MARK: - Utilities
 
     static func hashList(from raw: String?) -> [String] {
@@ -832,8 +1005,15 @@ public enum QBittorrentAPI {
 
     static func json(_ value: Any) -> Response {
         let data = (try? JSONSerialization.data(withJSONObject: value, options: [])) ?? Data("{}".utf8)
+        return jsonData(data)
+    }
+
+    static func jsonData(_ data: Data, contentDisposition: String? = nil) -> Response {
         var headers = HTTPFields()
         headers[.contentType] = "application/json"
+        if let contentDisposition {
+            headers[.contentDisposition] = contentDisposition
+        }
         return Response(status: .ok, headers: headers, body: .init(byteBuffer: ByteBuffer(bytes: data)))
     }
 }

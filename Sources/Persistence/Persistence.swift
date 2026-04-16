@@ -24,6 +24,49 @@ public enum SeedLimitAction: String, Codable, Sendable, CaseIterable {
     case removeDeleteFiles = "remove_delete_files"
 }
 
+/// Issue classes the recovery engine can match against.
+public enum RecoveryTrigger: String, Codable, Sendable, CaseIterable {
+    // Health-based (from HealthMonitor)
+    case metadataTimeout = "metadata_timeout"
+    case noPeers = "no_peers"
+    case stalledWithPeers = "stalled_with_peers"
+    case awaitingRecheck = "awaiting_recheck"
+    // Post-processing failures (from PostProcessor)
+    case postProcessMoveFailed = "post_process_move_failed"
+    case postProcessExtractionFailed = "post_process_extraction_failed"
+    // Disk pressure (from DiskSpaceMonitor)
+    case diskPressure = "disk_pressure"
+}
+
+/// Action Controllarr should take when a recovery rule triggers.
+public enum RecoveryAction: String, Codable, Sendable, CaseIterable {
+    case reannounce
+    case pause
+    case removeKeepFiles = "remove_keep_files"
+    case removeDeleteFiles = "remove_delete_files"
+    case retryPostProcess = "retry_post_process"
+}
+
+public struct RecoveryRule: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { "\(trigger.rawValue)-\(action.rawValue)-\(delayMinutes)" }
+    public var enabled: Bool
+    public var trigger: RecoveryTrigger
+    public var action: RecoveryAction
+    public var delayMinutes: Int
+
+    public init(
+        enabled: Bool = false,
+        trigger: RecoveryTrigger,
+        action: RecoveryAction,
+        delayMinutes: Int
+    ) {
+        self.enabled = enabled
+        self.trigger = trigger
+        self.action = action
+        self.delayMinutes = delayMinutes
+    }
+}
+
 public struct Category: Codable, Sendable, Equatable, Identifiable {
     public var id: String { name }
     public var name: String
@@ -195,6 +238,8 @@ public struct Settings: Codable, Sendable, Equatable {
     /// Force an immediate reannounce when a torrent first stalls, in the
     /// hope of picking up new peers.
     public var healthReannounceOnStall: Bool
+    /// Policy-driven recovery rules for active health issues.
+    public var recoveryRules: [RecoveryRule]
 
     // Bandwidth scheduler -------------------------------------------------------
 
@@ -253,6 +298,7 @@ public struct Settings: Codable, Sendable, Equatable {
             minimumSeedTimeMinutes: 60,
             healthStallMinutes: 30,
             healthReannounceOnStall: true,
+            recoveryRules: [],
             bandwidthSchedule: [],
             vpnEnabled: false,
             vpnKillSwitch: true,
@@ -282,6 +328,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.minimumSeedTimeMinutes = try c.decodeIfPresent(Int.self, forKey: .minimumSeedTimeMinutes) ?? 60
         self.healthStallMinutes = try c.decodeIfPresent(Int.self, forKey: .healthStallMinutes) ?? 30
         self.healthReannounceOnStall = try c.decodeIfPresent(Bool.self, forKey: .healthReannounceOnStall) ?? true
+        self.recoveryRules = try c.decodeIfPresent([RecoveryRule].self, forKey: .recoveryRules) ?? []
         self.bandwidthSchedule = try c.decodeIfPresent([BandwidthRule].self, forKey: .bandwidthSchedule) ?? []
         self.vpnEnabled = try c.decodeIfPresent(Bool.self, forKey: .vpnEnabled) ?? false
         self.vpnKillSwitch = try c.decodeIfPresent(Bool.self, forKey: .vpnKillSwitch) ?? true
@@ -309,6 +356,7 @@ public struct Settings: Codable, Sendable, Equatable {
         minimumSeedTimeMinutes: Int,
         healthStallMinutes: Int,
         healthReannounceOnStall: Bool,
+        recoveryRules: [RecoveryRule] = [],
         bandwidthSchedule: [BandwidthRule] = [],
         vpnEnabled: Bool = false,
         vpnKillSwitch: Bool = true,
@@ -334,6 +382,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.minimumSeedTimeMinutes = minimumSeedTimeMinutes
         self.healthStallMinutes = healthStallMinutes
         self.healthReannounceOnStall = healthReannounceOnStall
+        self.recoveryRules = recoveryRules
         self.bandwidthSchedule = bandwidthSchedule
         self.vpnEnabled = vpnEnabled
         self.vpnKillSwitch = vpnKillSwitch
@@ -368,6 +417,70 @@ public struct PersistedState: Codable, Sendable, Equatable {
         self.categories = categories
         self.categoryByHash = categoryByHash
         self.lastKnownGoodPort = lastKnownGoodPort
+    }
+}
+
+public enum BackupError: Error, LocalizedError, Sendable, Equatable {
+    case unsupportedFormat(Int)
+
+    public var errorDescription: String? {
+        switch self {
+        case .unsupportedFormat(let version):
+            return "Unsupported backup format version \(version)."
+        }
+    }
+}
+
+public struct BackupSecrets: Codable, Sendable, Equatable {
+    public var webUIPassword: String?
+    public var arrAPIKeys: [String: String]
+
+    public init(webUIPassword: String? = nil, arrAPIKeys: [String: String] = [:]) {
+        self.webUIPassword = webUIPassword
+        self.arrAPIKeys = arrAPIKeys
+    }
+}
+
+public struct BackupArchive: Codable, Sendable, Equatable {
+    public static let currentFormatVersion = 1
+
+    public var formatVersion: Int
+    public var createdAt: Date
+    public var state: PersistedState
+    public var secrets: BackupSecrets?
+
+    public init(
+        formatVersion: Int = BackupArchive.currentFormatVersion,
+        createdAt: Date = Date(),
+        state: PersistedState,
+        secrets: BackupSecrets? = nil
+    ) {
+        self.formatVersion = formatVersion
+        self.createdAt = createdAt
+        self.state = state
+        self.secrets = secrets
+    }
+}
+
+public struct BackupRestoreResult: Codable, Sendable, Equatable {
+    public var restoredAt: Date
+    public var categoryCount: Int
+    public var endpointCount: Int
+    public var includedSecrets: Bool
+    public var restartRecommended: Bool
+
+    public init(
+        restoredAt: Date = Date(),
+        categoryCount: Int,
+        endpointCount: Int,
+        includedSecrets: Bool,
+        restartRecommended: Bool
+    ) {
+        self.restoredAt = restoredAt
+        self.categoryCount = categoryCount
+        self.endpointCount = endpointCount
+        self.includedSecrets = includedSecrets
+        self.restartRecommended = restartRecommended
     }
 }
 
@@ -490,6 +603,28 @@ public actor PersistenceStore {
         category(named: name)?.savePath
     }
 
+    public func exportBackup(includeSecrets: Bool) -> BackupArchive {
+        let secrets: BackupSecrets?
+        if includeSecrets {
+            var arrAPIKeys: [String: String] = [:]
+            for endpoint in state.settings.arrEndpoints {
+                let key = Keychain.get(forKey: "arr_\(endpoint.name)") ?? ""
+                if !key.isEmpty {
+                    arrAPIKeys[endpoint.name] = key
+                }
+            }
+            let password = resolvedWebUIPassword()
+            secrets = BackupSecrets(
+                webUIPassword: password.isEmpty ? nil : password,
+                arrAPIKeys: arrAPIKeys
+            )
+        } else {
+            secrets = nil
+        }
+
+        return BackupArchive(state: state, secrets: secrets)
+    }
+
     // MARK: Write
 
     public func updateSettings(_ transform: (inout Settings) -> Void) {
@@ -530,6 +665,49 @@ public actor PersistenceStore {
     public func setLastKnownGoodPort(_ port: UInt16?) {
         state.lastKnownGoodPort = port
         scheduleFlush()
+    }
+
+    public func restoreBackup(_ backup: BackupArchive) throws -> BackupRestoreResult {
+        guard (1...BackupArchive.currentFormatVersion).contains(backup.formatVersion) else {
+            throw BackupError.unsupportedFormat(backup.formatVersion)
+        }
+
+        let previousSettings = state.settings
+        var restoredState = backup.state
+
+        if let password = backup.secrets?.webUIPassword, !password.isEmpty {
+            Keychain.set(password, forKey: Keychain.webUIPasswordKey)
+            restoredState.settings.webUIPassword = "__keychain__"
+        } else if !restoredState.settings.webUIPassword.isEmpty,
+                  restoredState.settings.webUIPassword != "__keychain__" {
+            Keychain.set(restoredState.settings.webUIPassword, forKey: Keychain.webUIPasswordKey)
+            restoredState.settings.webUIPassword = "__keychain__"
+        }
+
+        for index in restoredState.settings.arrEndpoints.indices {
+            let endpoint = restoredState.settings.arrEndpoints[index]
+            if let apiKey = backup.secrets?.arrAPIKeys[endpoint.name], !apiKey.isEmpty {
+                Keychain.set(apiKey, forKey: "arr_\(endpoint.name)")
+                restoredState.settings.arrEndpoints[index].apiKeyInKeychain = true
+                restoredState.settings.arrEndpoints[index].apiKey = ""
+            } else if !endpoint.apiKey.isEmpty {
+                Keychain.set(endpoint.apiKey, forKey: "arr_\(endpoint.name)")
+                restoredState.settings.arrEndpoints[index].apiKeyInKeychain = true
+                restoredState.settings.arrEndpoints[index].apiKey = ""
+            }
+        }
+
+        state = restoredState
+        scheduleFlush()
+
+        return BackupRestoreResult(
+            categoryCount: restoredState.categories.count,
+            endpointCount: restoredState.settings.arrEndpoints.count,
+            includedSecrets: backup.secrets != nil,
+            restartRecommended:
+                previousSettings.webUIHost != restoredState.settings.webUIHost
+                || previousSettings.webUIPort != restoredState.settings.webUIPort
+        )
     }
 
     // MARK: Flush

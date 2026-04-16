@@ -27,6 +27,7 @@ public actor ControllarrRuntime {
     public nonisolated let postProcessor: PostProcessor
     public nonisolated let seedingPolicy: SeedingPolicy
     public nonisolated let healthMonitor: HealthMonitor
+    public nonisolated let recoveryCenter: RecoveryCenter
     public nonisolated let bandwidthScheduler: BandwidthScheduler
     public nonisolated let diskSpaceMonitor: DiskSpaceMonitor
     public nonisolated let vpnMonitor: VPNMonitor
@@ -34,11 +35,16 @@ public actor ControllarrRuntime {
 
     private var tickTask: Task<Void, Never>?
 
-    public init(webUIRoot: URL?) async {
+    public init(
+        webUIRoot: URL?,
+        storeDirectory: URL? = nil,
+        httpHostOverride: String? = nil,
+        httpPortOverride: Int? = nil
+    ) async {
         let logger = Logger()
         self.logger = logger
 
-        let store = PersistenceStore()
+        let store = PersistenceStore(directory: storeDirectory ?? PersistenceStore.defaultDirectory())
         self.store = store
         await store.flushMigrationIfNeeded()
 
@@ -84,6 +90,16 @@ public actor ControllarrRuntime {
         let diskSpaceMonitor = DiskSpaceMonitor(engine: engine, store: store, logger: logger)
         self.diskSpaceMonitor = diskSpaceMonitor
 
+        let recoveryCenter = RecoveryCenter(
+            engine: engine,
+            store: store,
+            healthMonitor: healthMonitor,
+            postProcessor: postProcessor,
+            diskSpaceMonitor: diskSpaceMonitor,
+            logger: logger
+        )
+        self.recoveryCenter = recoveryCenter
+
         let vpnMonitor = VPNMonitor(engine: engine, store: store, logger: logger)
         self.vpnMonitor = vpnMonitor
 
@@ -91,8 +107,8 @@ public actor ControllarrRuntime {
         self.arrNotifier = arrNotifier
 
         let httpConfig = HTTPServer.Configuration(
-            host: snapshot.settings.webUIHost,
-            port: snapshot.settings.webUIPort,
+            host: httpHostOverride ?? snapshot.settings.webUIHost,
+            port: httpPortOverride ?? snapshot.settings.webUIPort,
             webUIRoot: webUIRoot
         )
         let services = HTTPServer.Services(
@@ -102,6 +118,7 @@ public actor ControllarrRuntime {
             postProcessor: postProcessor,
             seedingPolicy: seedingPolicy,
             healthMonitor: healthMonitor,
+            recoveryCenter: recoveryCenter,
             diskSpaceMonitor: diskSpaceMonitor,
             vpnMonitor: vpnMonitor,
             arrNotifier: arrNotifier,
@@ -147,6 +164,7 @@ public actor ControllarrRuntime {
         let postProcessor = self.postProcessor
         let seedingPolicy = self.seedingPolicy
         let healthMonitor = self.healthMonitor
+        let recoveryCenter = self.recoveryCenter
         let arrNotifier = self.arrNotifier
         tickTask = Task.detached(priority: .utility) {
             while !Task.isCancelled {
@@ -155,6 +173,7 @@ public actor ControllarrRuntime {
                 await postProcessor.tick(torrents: torrents)
                 await seedingPolicy.tick(torrents: torrents)
                 await healthMonitor.tick(torrents: torrents)
+                await recoveryCenter.tick()
                 await arrNotifier.tick()
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }

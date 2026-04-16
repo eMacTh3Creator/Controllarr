@@ -24,6 +24,7 @@ import Foundation
     #expect(s.minimumSeedTimeMinutes == 60)
     #expect(s.healthStallMinutes == 30)
     #expect(s.healthReannounceOnStall == true)
+    #expect(s.recoveryRules.isEmpty)
     #expect(s.globalMaxRatio == nil)
     #expect(s.globalMaxSeedingTimeMinutes == nil)
     #expect(s.bandwidthSchedule.isEmpty)
@@ -61,6 +62,7 @@ import Foundation
     #expect(s.minimumSeedTimeMinutes == 60)
     #expect(s.healthStallMinutes == 30)
     #expect(s.healthReannounceOnStall == true)
+    #expect(s.recoveryRules.isEmpty)
     #expect(s.globalMaxRatio == nil)
     #expect(s.globalMaxSeedingTimeMinutes == nil)
     #expect(s.bandwidthSchedule.isEmpty)
@@ -97,12 +99,34 @@ import Foundation
         minimumSeedTimeMinutes: 120,
         healthStallMinutes: 45,
         healthReannounceOnStall: false,
+        recoveryRules: [
+            RecoveryRule(
+                enabled: true,
+                trigger: .noPeers,
+                action: .pause,
+                delayMinutes: 60
+            )
+        ],
         bandwidthSchedule: [rule]
     )
     let encoder = JSONEncoder()
     encoder.outputFormatting = .sortedKeys
     let data = try encoder.encode(original)
     let decoded = try JSONDecoder().decode(Settings.self, from: data)
+    #expect(decoded == original)
+}
+
+@Test func testRecoveryRuleRoundTrip() throws {
+    let original = RecoveryRule(
+        enabled: true,
+        trigger: .stalledWithPeers,
+        action: .reannounce,
+        delayMinutes: 30
+    )
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    let data = try encoder.encode(original)
+    let decoded = try JSONDecoder().decode(RecoveryRule.self, from: data)
     #expect(decoded == original)
 }
 
@@ -163,4 +187,78 @@ import Foundation
     let data = try encoder.encode(original)
     let decoded = try JSONDecoder().decode(BandwidthRule.self, from: data)
     #expect(decoded == original)
+}
+
+// MARK: - Backup
+
+@Test func testBackupArchiveRoundTrip() throws {
+    var settings = Settings.defaults(homeDir: URL(fileURLWithPath: "/tmp/controllarr-backup"))
+    settings.webUIPassword = ""
+    settings.arrEndpoints = []
+
+    let state = PersistedState(
+        settings: settings,
+        categories: [
+            Category(name: "Movies", savePath: "/tmp/movies", completePath: "/media/movies")
+        ],
+        categoryByHash: ["abc123": "Movies"],
+        lastKnownGoodPort: 50505
+    )
+    let original = BackupArchive(
+        createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+        state: state,
+        secrets: BackupSecrets(arrAPIKeys: ["sonarr": "secret"])
+    )
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    let data = try encoder.encode(original)
+    let decoded = try JSONDecoder().decode(BackupArchive.self, from: data)
+    #expect(decoded == original)
+}
+
+@Test func testRestoreBackupReplacesStateAndFlagsRestart() async throws {
+    let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("controllarr-store-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let store = PersistenceStore(directory: tempDir)
+
+    await store.updateSettings { settings in
+        settings.webUIHost = "127.0.0.1"
+        settings.webUIPort = 8791
+        settings.webUIPassword = ""
+        settings.arrEndpoints = []
+    }
+    await store.upsertCategory(Category(name: "Old", savePath: "/tmp/old"))
+
+    var restoredSettings = Settings.defaults(homeDir: URL(fileURLWithPath: "/tmp/restored"))
+    restoredSettings.webUIHost = "0.0.0.0"
+    restoredSettings.webUIPort = 9090
+    restoredSettings.webUIPassword = ""
+    restoredSettings.defaultSavePath = "/srv/downloads"
+    restoredSettings.arrEndpoints = [
+        ArrEndpoint(name: "Radarr", kind: .radarr, baseURL: "http://localhost:7878")
+    ]
+
+    let backup = BackupArchive(
+        state: PersistedState(
+            settings: restoredSettings,
+            categories: [
+                Category(name: "Movies", savePath: "/srv/downloads/movies")
+            ],
+            categoryByHash: ["hash-1": "Movies"],
+            lastKnownGoodPort: 55555
+        )
+    )
+
+    let result = try await store.restoreBackup(backup)
+    let snapshot = await store.snapshot()
+
+    #expect(result.restartRecommended)
+    #expect(!result.includedSecrets)
+    #expect(result.categoryCount == 1)
+    #expect(result.endpointCount == 1)
+    #expect(snapshot == backup.state)
 }

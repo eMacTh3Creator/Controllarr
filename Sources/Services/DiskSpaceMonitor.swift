@@ -19,6 +19,10 @@ public actor DiskSpaceMonitor {
         public let freeBytes: Int64
         /// The configured minimum threshold in bytes.
         public let thresholdBytes: Int64
+        /// Path currently being monitored. Falls back to the default save path.
+        public let monitorPath: String
+        /// Extra free space required to clear the current threshold.
+        public let shortfallBytes: Int64
         /// True if downloads are currently paused due to low space.
         public let isPaused: Bool
         /// Hashes of torrents paused by the disk space monitor.
@@ -34,6 +38,8 @@ public actor DiskSpaceMonitor {
     /// is freed; user-paused torrents are left alone.
     private var pausedByUs: Set<String> = []
     private var lastFreeBytes: Int64 = 0
+    private var lastThresholdBytes: Int64 = 0
+    private var lastMonitorPath: String = ""
     private var downloadsPaused: Bool = false
 
     public init(engine: TorrentEngine, store: PersistenceStore, logger: Logger) {
@@ -60,7 +66,9 @@ public actor DiskSpaceMonitor {
     public func snapshot() -> Status {
         let settings = Status(
             freeBytes: lastFreeBytes,
-            thresholdBytes: 0,
+            thresholdBytes: lastThresholdBytes,
+            monitorPath: lastMonitorPath,
+            shortfallBytes: max(0, lastThresholdBytes - lastFreeBytes),
             isPaused: downloadsPaused,
             pausedHashes: pausedByUs
         )
@@ -74,6 +82,12 @@ public actor DiskSpaceMonitor {
 
     private func evaluate() async {
         let settings = await store.settings()
+        let monitorPath = settings.diskSpaceMonitorPath.isEmpty
+            ? settings.defaultSavePath
+            : settings.diskSpaceMonitorPath
+        let thresholdBytes = Int64(max(0, settings.diskSpaceMinimumGB ?? 0)) * 1_073_741_824
+        lastMonitorPath = monitorPath
+        lastThresholdBytes = thresholdBytes
 
         // Feature disabled?
         guard let minGB = settings.diskSpaceMinimumGB, minGB > 0 else {
@@ -87,22 +101,15 @@ public actor DiskSpaceMonitor {
             return
         }
 
-        let monitorPath: String
-        if settings.diskSpaceMonitorPath.isEmpty {
-            monitorPath = settings.defaultSavePath
-        } else {
-            monitorPath = settings.diskSpaceMonitorPath
-        }
-
         guard let freeBytes = freeDiskSpace(at: monitorPath) else {
             logger.warn("diskspace", "could not read free space at \(monitorPath)")
             return
         }
 
         lastFreeBytes = freeBytes
-        let thresholdBytes = Int64(minGB) * 1_073_741_824 // GB -> bytes
+        lastThresholdBytes = Int64(minGB) * 1_073_741_824 // GB -> bytes
 
-        if freeBytes < thresholdBytes {
+        if freeBytes < lastThresholdBytes {
             // Low space — pause all downloading torrents.
             if !downloadsPaused {
                 let torrents = await engine.pollStats()

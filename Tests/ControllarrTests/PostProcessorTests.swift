@@ -54,3 +54,13 @@ import Foundation
     let result = PostProcessor.runBsdtar(archive: fakeArchive, destination: fakeDest)
     #expect(result.success == false)
 }
+
+@Test func testFailedStageIsRetryable() {
+    #expect(PostProcessor.isRetryable(stage: .failed(reason: "bsdtar failed")))
+}
+
+@Test func testNonFailedStagesAreNotRetryable() {
+    #expect(PostProcessor.isRetryable(stage: .pending) == false)
+    #expect(PostProcessor.isRetryable(stage: .extracting) == false)
+    #expect(PostProcessor.isRetryable(stage: .done) == false)
+}

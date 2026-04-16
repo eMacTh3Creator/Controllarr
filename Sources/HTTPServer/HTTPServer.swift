@@ -38,6 +38,7 @@ public actor HTTPServer {
         public let postProcessor: PostProcessor
         public let seedingPolicy: SeedingPolicy
         public let healthMonitor: HealthMonitor
+        public let recoveryCenter: RecoveryCenter
         public let diskSpaceMonitor: DiskSpaceMonitor
         public let vpnMonitor: VPNMonitor
         public let arrNotifier: ArrNotifier
@@ -52,6 +53,7 @@ public actor HTTPServer {
             postProcessor: PostProcessor,
             seedingPolicy: SeedingPolicy,
             healthMonitor: HealthMonitor,
+            recoveryCenter: RecoveryCenter,
             diskSpaceMonitor: DiskSpaceMonitor,
             vpnMonitor: VPNMonitor,
             arrNotifier: ArrNotifier,
@@ -63,6 +65,7 @@ public actor HTTPServer {
             self.postProcessor = postProcessor
             self.seedingPolicy = seedingPolicy
             self.healthMonitor = healthMonitor
+            self.recoveryCenter = recoveryCenter
             self.diskSpaceMonitor = diskSpaceMonitor
             self.vpnMonitor = vpnMonitor
             self.arrNotifier = arrNotifier

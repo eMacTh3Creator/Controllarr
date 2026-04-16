@@ -12,11 +12,15 @@ import Foundation
     let status = DiskSpaceMonitor.Status(
         freeBytes: 50_000_000_000,
         thresholdBytes: 10_000_000_000,
+        monitorPath: "/Volumes/Media",
+        shortfallBytes: 0,
         isPaused: false,
         pausedHashes: []
     )
     #expect(status.freeBytes == 50_000_000_000)
     #expect(status.thresholdBytes == 10_000_000_000)
+    #expect(status.monitorPath == "/Volumes/Media")
+    #expect(status.shortfallBytes == 0)
     #expect(status.isPaused == false)
     #expect(status.pausedHashes.isEmpty)
 }
@@ -26,11 +30,15 @@ import Foundation
     let status = DiskSpaceMonitor.Status(
         freeBytes: 1_000_000_000,
         thresholdBytes: 10_000_000_000,
+        monitorPath: "/Volumes/Media",
+        shortfallBytes: 9_000_000_000,
         isPaused: true,
         pausedHashes: hashes
     )
     #expect(status.freeBytes == 1_000_000_000)
     #expect(status.thresholdBytes == 10_000_000_000)
+    #expect(status.monitorPath == "/Volumes/Media")
+    #expect(status.shortfallBytes == 9_000_000_000)
     #expect(status.isPaused == true)
     #expect(status.pausedHashes.count == 2)
     #expect(status.pausedHashes.contains("abc123"))
