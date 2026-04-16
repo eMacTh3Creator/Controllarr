@@ -230,7 +230,7 @@ static int ctrl_balanced_hashing_threads() {
         lt::settings_pack pack;
         pack.set_str(lt::settings_pack::listen_interfaces,
                      ctrl_build_listen_interfaces(port, bindAll).UTF8String);
-        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.0.2 libtorrent/2.0");
+        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.1.0 libtorrent/2.0");
         pack.set_int(lt::settings_pack::alert_mask,
                      lt::alert_category::error
                      | lt::alert_category::status
@@ -408,6 +408,107 @@ static int ctrl_balanced_hashing_threads() {
     if (!h.is_valid()) return NO;
     h.force_reannounce();
     return YES;
+}
+
+- (BOOL)forceRecheckTorrent:(NSString *)infoHash {
+    auto h = [self handleFor:infoHash];
+    if (!h.is_valid()) return NO;
+    h.force_recheck();
+    return YES;
+}
+
+- (nullable NSString *)makeMagnetForTorrent:(NSString *)infoHash {
+    auto h = [self handleFor:infoHash];
+    if (!h.is_valid()) return nil;
+    try {
+        std::string magnet = lt::make_magnet_uri(h);
+        if (magnet.empty()) return nil;
+        return [NSString stringWithUTF8String:magnet.c_str()];
+    } catch (std::exception const &) {
+        return nil;
+    }
+}
+
+// MARK: Duplicate-detection helpers
+
+- (nullable NSString *)infoHashForMagnet:(NSString *)magnetURI {
+    if (!magnetURI.length) return nil;
+    lt::error_code ec;
+    lt::add_torrent_params atp = lt::parse_magnet_uri(magnetURI.UTF8String, ec);
+    if (ec) return nil;
+    return ctrl_hex_from_bytes(atp.info_hashes.get_best().to_string());
+}
+
+- (nullable NSString *)infoHashForTorrentFile:(NSString *)path {
+    if (!path.length) return nil;
+    try {
+        lt::add_torrent_params atp = lt::load_torrent_file(path.UTF8String);
+        return ctrl_hex_from_bytes(atp.info_hashes.get_best().to_string());
+    } catch (std::exception const &) {
+        return nil;
+    }
+}
+
+- (NSArray<NSString *> *)trackersInMagnet:(NSString *)magnetURI {
+    if (!magnetURI.length) return @[];
+    lt::error_code ec;
+    lt::add_torrent_params atp = lt::parse_magnet_uri(magnetURI.UTF8String, ec);
+    if (ec) return @[];
+    NSMutableArray<NSString *> *out = [NSMutableArray arrayWithCapacity:atp.trackers.size()];
+    for (std::string const &t : atp.trackers) {
+        [out addObject:ctrl_nsstring(t)];
+    }
+    return out;
+}
+
+- (NSArray<NSString *> *)trackersInTorrentFile:(NSString *)path {
+    if (!path.length) return @[];
+    try {
+        lt::add_torrent_params atp = lt::load_torrent_file(path.UTF8String);
+        NSMutableArray<NSString *> *out = [NSMutableArray arrayWithCapacity:atp.trackers.size()];
+        for (std::string const &t : atp.trackers) {
+            [out addObject:ctrl_nsstring(t)];
+        }
+        return out;
+    } catch (std::exception const &) {
+        return @[];
+    }
+}
+
+- (BOOL)hasTorrent:(NSString *)infoHash {
+    if (!infoHash.length) return NO;
+    std::string bytes = ctrl_bytes_from_hex(infoHash);
+    if (_handlesByHash.find(bytes) != _handlesByHash.end()) return YES;
+    // Fallback: rescan session in case the cache is stale.
+    for (auto const &h : _session->get_torrents()) {
+        if (h.is_valid() && h.info_hashes().get_best().to_string() == bytes) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (NSInteger)addTrackersToTorrent:(NSString *)infoHash
+                         trackers:(NSArray<NSString *> *)trackers {
+    auto h = [self handleFor:infoHash];
+    if (!h.is_valid() || trackers.count == 0) return 0;
+    // Build a set of existing announce URLs so we only count genuinely new
+    // trackers toward the return value. libtorrent itself silently
+    // deduplicates duplicate add_tracker() calls.
+    std::vector<lt::announce_entry> existing = h.trackers();
+    std::unordered_map<std::string, bool> seen;
+    for (auto const &e : existing) seen[e.url] = true;
+
+    NSInteger added = 0;
+    for (NSString *url in trackers) {
+        std::string s = url.UTF8String;
+        if (seen.find(s) != seen.end()) continue;
+        lt::announce_entry entry(s);
+        h.add_tracker(entry);
+        seen[s] = true;
+        added++;
+    }
+    return added;
 }
 
 - (NSArray<CTRLTrackerInfo *> *)trackersForInfoHash:(NSString *)infoHash {
@@ -721,8 +822,22 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
 }
 
 - (void)forceReannounceAll {
+    // Tracker reannounce with ignore_min_interval so we bypass the
+    // announce-interval backoff and hit every tracker immediately.
+    // Also kick DHT and LSD announces so peers learn the new listen
+    // port through every available discovery channel — this is the
+    // "actively reconnect" behavior the port-cycle flow needs.
     for (auto const &h : _session->get_torrents()) {
-        if (h.is_valid()) h.force_reannounce();
+        if (!h.is_valid()) continue;
+        try {
+            h.force_reannounce(0, -1, lt::torrent_handle::ignore_min_interval);
+        } catch (...) {
+            // Some torrent states (e.g. waiting for metadata with no
+            // tracker info yet) throw. Fall back to the vanilla form.
+            h.force_reannounce();
+        }
+        try { h.force_dht_announce(); } catch (...) {}
+        try { h.force_lsd_announce(); } catch (...) {}
     }
 }
 

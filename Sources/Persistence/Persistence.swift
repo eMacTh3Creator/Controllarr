@@ -50,6 +50,22 @@ public enum CategoryMovePolicy: String, Codable, Sendable, CaseIterable {
     case never
 }
 
+/// What to do when a magnet / .torrent is submitted whose info-hash is
+/// already in the session.
+public enum DuplicateTorrentPolicy: String, Codable, Sendable, CaseIterable {
+    /// Silently ignore the duplicate add request. Existing torrent stays
+    /// untouched. This matches real qBittorrent's behavior by default.
+    case ignore
+    /// Parse trackers from the incoming add request and union-merge them
+    /// into the existing torrent via `libtorrent::torrent_handle::add_tracker`.
+    /// Safe to call even if all trackers already exist.
+    case mergeTrackers = "merge_trackers"
+    /// Native UI: surface a prompt to the user. WebUI / *arr (non-interactive)
+    /// falls back to `mergeTrackers` so re-adds from Sonarr/Radarr still
+    /// pick up new trackers without blocking the request.
+    case ask
+}
+
 /// Action Controllarr should take when a recovery rule triggers.
 public enum RecoveryAction: String, Codable, Sendable, CaseIterable {
     case reannounce
@@ -442,6 +458,10 @@ public struct Settings: Codable, Sendable, Equatable {
     /// move; "never" = never move.
     public var categoryChangeMove: CategoryMovePolicy
 
+    /// What to do when a magnet / .torrent is added that matches an
+    /// already-running torrent by info-hash.
+    public var duplicateTorrentPolicy: DuplicateTorrentPolicy
+
     public static func defaults(homeDir: URL) -> Settings {
         Settings(
             listenPortRangeStart: 49152,
@@ -475,7 +495,8 @@ public struct Settings: Codable, Sendable, Equatable {
             connectionLimits: ConnectionLimits(),
             webUISecurity: WebUISecurity(),
             uiPreferences: UIPreferences(),
-            categoryChangeMove: .ask
+            categoryChangeMove: .ask,
+            duplicateTorrentPolicy: .mergeTrackers
         )
     }
 
@@ -511,6 +532,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.webUISecurity = try c.decodeIfPresent(WebUISecurity.self, forKey: .webUISecurity) ?? WebUISecurity()
         self.uiPreferences = try c.decodeIfPresent(UIPreferences.self, forKey: .uiPreferences) ?? UIPreferences()
         self.categoryChangeMove = try c.decodeIfPresent(CategoryMovePolicy.self, forKey: .categoryChangeMove) ?? .ask
+        self.duplicateTorrentPolicy = try c.decodeIfPresent(DuplicateTorrentPolicy.self, forKey: .duplicateTorrentPolicy) ?? .mergeTrackers
     }
 
     public init(
@@ -543,7 +565,8 @@ public struct Settings: Codable, Sendable, Equatable {
         connectionLimits: ConnectionLimits = ConnectionLimits(),
         webUISecurity: WebUISecurity = WebUISecurity(),
         uiPreferences: UIPreferences = UIPreferences(),
-        categoryChangeMove: CategoryMovePolicy = .ask
+        categoryChangeMove: CategoryMovePolicy = .ask,
+        duplicateTorrentPolicy: DuplicateTorrentPolicy = .mergeTrackers
     ) {
         self.listenPortRangeStart = listenPortRangeStart
         self.listenPortRangeEnd = listenPortRangeEnd
@@ -575,6 +598,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.webUISecurity = webUISecurity
         self.uiPreferences = uiPreferences
         self.categoryChangeMove = categoryChangeMove
+        self.duplicateTorrentPolicy = duplicateTorrentPolicy
     }
 }
 

@@ -106,6 +106,30 @@ typedef NS_ENUM(NSInteger, CTRLTorrentState) {
               savePath:(nullable NSString *)savePath
                  error:(NSError * _Nullable *)error;
 
+/// Inspect a magnet URI WITHOUT adding it. Returns the lowercase-hex info
+/// hash on success, nil if the URI is malformed.
+- (nullable NSString *)infoHashForMagnet:(NSString *)magnetURI;
+
+/// Inspect a .torrent file WITHOUT adding it. Returns the lowercase-hex
+/// info hash on success, nil if the file is unreadable / malformed.
+- (nullable NSString *)infoHashForTorrentFile:(NSString *)path;
+
+/// Return the list of tracker URLs embedded in a magnet URI (the `&tr=`
+/// parameters). Does not add the torrent.
+- (NSArray<NSString *> *)trackersInMagnet:(NSString *)magnetURI;
+
+/// Return the list of tracker URLs embedded in a .torrent file.
+- (NSArray<NSString *> *)trackersInTorrentFile:(NSString *)path;
+
+/// True if the session already has a torrent with this info hash.
+- (BOOL)hasTorrent:(NSString *)infoHash;
+
+/// Merge additional tracker URLs into an existing torrent (used by the
+/// duplicate-add "merge trackers" policy). Duplicate URLs are ignored by
+/// libtorrent. Returns the count of trackers that were new.
+- (NSInteger)addTrackersToTorrent:(NSString *)infoHash
+                         trackers:(NSArray<NSString *> *)trackers;
+
 // MARK: Mutating torrents
 
 /// Pause a torrent by info hash (hex, lowercase). Returns NO if not found.
@@ -143,6 +167,16 @@ typedef NS_ENUM(NSInteger, CTRLTorrentState) {
 /// Ask the tracker swarm for an immediate re-announce on one torrent.
 /// Used by the health watcher when flagging a stall.
 - (BOOL)reannounceTorrent:(NSString *)infoHash;
+
+/// Force a full piece-hash verification of a torrent's files on disk.
+/// Equivalent to qBittorrent's "Force Recheck". Useful after moving
+/// files manually or recovering partial downloads from another client.
+- (BOOL)forceRecheckTorrent:(NSString *)infoHash;
+
+/// Reconstruct a magnet: URI for an already-running torrent. Returns
+/// nil if metadata isn't yet available (which can happen for magnet
+/// torrents whose DHT/peer metadata fetch hasn't completed).
+- (nullable NSString *)makeMagnetForTorrent:(NSString *)infoHash;
 
 /// Return the list of trackers for a torrent. Returns nil if unknown.
 - (nullable NSArray<CTRLTrackerInfo *> *)trackersForInfoHash:(NSString *)infoHash;

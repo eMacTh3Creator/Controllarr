@@ -238,7 +238,19 @@ struct TorrentsView: View {
     @State private var magnetURI = ""
     @State private var addCategory: String = ""
     @State private var addError: String?
-    @State private var selectedHash: String?
+    /// Multi-selection of torrent info-hashes. The Table supports cmd-
+    /// click / shift-click to select multiple rows for batch operations
+    /// (mass pause, mass recheck, mass reannounce, mass delete).
+    @State private var selectedHashes: Set<String> = []
+    /// Computed "primary selection" — the single hash to bind the
+    /// detail pane to. If multiple rows are selected the first one in
+    /// the filtered list wins, matching qBittorrent's behavior.
+    private var selectedHash: String? {
+        if selectedHashes.count == 1 { return selectedHashes.first }
+        return filteredSortedTorrents
+            .first(where: { selectedHashes.contains($0.infoHash) })?
+            .infoHash
+    }
     @State private var dropTargeted = false
     @State private var statusFilter: TorrentStatusFilter = .all
     /// Empty string = "All Categories".
@@ -270,6 +282,152 @@ struct TorrentsView: View {
         vm.torrents
             .filter { statusFilter.matches($0) && matchesCategoryFilter($0) }
             .sorted(using: sortOrder)
+    }
+
+    /// Build the right-click context menu for the given selection of
+    /// torrent info-hashes. Uses the first hash for per-torrent actions
+    /// like pause/resume that need to inspect state; bulk actions
+    /// (remove, recheck) iterate the whole set.
+    @ViewBuilder
+    private func torrentContextMenu(for hashes: Set<String>) -> some View {
+        let selected = hashes.compactMap { h in
+            vm.torrents.first(where: { $0.infoHash == h })
+        }
+        if selected.isEmpty {
+            // Click on empty row area — offer an Add Magnet shortcut.
+            Button {
+                magnetURI = ""
+                addCategory = ""
+                addError = nil
+                addOpen = true
+            } label: {
+                Label("Add Magnet…", systemImage: "plus")
+            }
+        } else {
+            // Pause/Resume toggles based on the primary selection.
+            if let primary = selected.first {
+                if primary.paused {
+                    Button {
+                        Task {
+                            for t in selected { await vm.resume(hash: t.infoHash) }
+                        }
+                    } label: {
+                        Label("Resume", systemImage: "play.fill")
+                    }
+                } else {
+                    Button {
+                        Task {
+                            for t in selected { await vm.pause(hash: t.infoHash) }
+                        }
+                    } label: {
+                        Label("Pause", systemImage: "pause.fill")
+                    }
+                }
+            }
+
+            Button {
+                Task {
+                    for t in selected { await vm.forceRecheck(hash: t.infoHash) }
+                }
+            } label: {
+                Label("Force Recheck", systemImage: "checkmark.seal")
+            }
+
+            Button {
+                Task {
+                    for t in selected { await vm.reannounce(hash: t.infoHash) }
+                }
+            } label: {
+                Label("Reannounce", systemImage: "arrow.clockwise")
+            }
+
+            Divider()
+
+            // Single-selection actions.
+            if selected.count == 1, let t = selected.first {
+                Button {
+                    vm.openInFinder(hash: t.infoHash)
+                } label: {
+                    Label("Open in Finder", systemImage: "folder")
+                }
+
+                Menu {
+                    Button {
+                        Task { await vm.copyMagnet(hash: t.infoHash) }
+                    } label: {
+                        Label("Magnet Link", systemImage: "link")
+                    }
+                    Button {
+                        let pb = NSPasteboard.general
+                        pb.clearContents()
+                        pb.setString(t.name, forType: .string)
+                    } label: {
+                        Label("Name", systemImage: "text.quote")
+                    }
+                    Button {
+                        let pb = NSPasteboard.general
+                        pb.clearContents()
+                        pb.setString(t.infoHash, forType: .string)
+                    } label: {
+                        Label("Info Hash", systemImage: "number")
+                    }
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+
+                Menu {
+                    Button {
+                        Task { await vm.changeCategory(hash: t.infoHash, to: nil, moveFiles: false) }
+                    } label: {
+                        Label("— (none)", systemImage: (t.category == nil) ? "checkmark" : "")
+                    }
+                    if !vm.categories.isEmpty {
+                        Divider()
+                        ForEach(vm.categories.map(\.name).sorted(), id: \.self) { name in
+                            Button {
+                                Task {
+                                    await vm.changeCategory(
+                                        hash: t.infoHash,
+                                        to: name,
+                                        moveFiles: vm.settings.categoryChangeMove == .always
+                                    )
+                                }
+                            } label: {
+                                if t.category == name {
+                                    Label(name, systemImage: "checkmark")
+                                } else {
+                                    Text(name)
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Category", systemImage: "folder.badge.gearshape")
+                }
+            }
+
+            Divider()
+
+            Button {
+                Task {
+                    for t in selected {
+                        await vm.remove(hash: t.infoHash, deleteFiles: false)
+                    }
+                }
+            } label: {
+                Label("Remove (keep files)", systemImage: "minus.circle")
+            }
+
+            Button(role: .destructive) {
+                Task {
+                    for t in selected {
+                        await vm.remove(hash: t.infoHash, deleteFiles: true)
+                    }
+                }
+            } label: {
+                Label("Remove and delete files", systemImage: "trash")
+            }
+        }
     }
 
     var body: some View {
@@ -318,7 +476,7 @@ struct TorrentsView: View {
 
                 Table(
                     filteredSortedTorrents,
-                    selection: $selectedHash,
+                    selection: $selectedHashes,
                     sortOrder: $sortOrder,
                     columnCustomization: $columnCustomization
                 ) {
@@ -360,6 +518,15 @@ struct TorrentsView: View {
                         Text(t.category ?? "—").font(.caption).foregroundStyle(.secondary)
                     }.width(min: 80, ideal: 100).customizationID("category")
                 }
+                .contextMenu(forSelectionType: String.self) { hashes in
+                    torrentContextMenu(for: hashes)
+                } primaryAction: { hashes in
+                    // Double-click reveals the torrent in Finder, matching
+                    // qBittorrent's default behavior.
+                    if let hash = hashes.first {
+                        vm.openInFinder(hash: hash)
+                    }
+                }
                 .onAppear {
                     // Hydrate persisted filters on first load.
                     if let restored = TorrentStatusFilter(
@@ -387,28 +554,63 @@ struct TorrentsView: View {
                         Label("Add .torrent", systemImage: "doc.badge.plus")
                     }
 
-                    if let hash = selectedHash, let t = vm.torrents.first(where: { $0.infoHash == hash }) {
+                    if !selectedHashes.isEmpty {
+                        let selectedTorrents = vm.torrents.filter { selectedHashes.contains($0.infoHash) }
+                        let anyRunning = selectedTorrents.contains(where: { !$0.paused })
+
                         Button {
-                            Task { t.paused ? await vm.resume(hash: hash) : await vm.pause(hash: hash) }
+                            Task {
+                                for t in selectedTorrents {
+                                    if anyRunning { await vm.pause(hash: t.infoHash) }
+                                    else          { await vm.resume(hash: t.infoHash) }
+                                }
+                            }
                         } label: {
-                            Label(t.paused ? "Resume" : "Pause", systemImage: t.paused ? "play.fill" : "pause.fill")
+                            Label(
+                                anyRunning ? "Pause" : "Resume",
+                                systemImage: anyRunning ? "pause.fill" : "play.fill"
+                            )
                         }
 
                         Button {
-                            Task { await vm.reannounce(hash: hash) }
+                            Task {
+                                for t in selectedTorrents { await vm.reannounce(hash: t.infoHash) }
+                            }
                         } label: {
                             Label("Reannounce", systemImage: "arrow.clockwise")
                         }
 
-                        Menu {
-                            Button("Remove torrent (keep files)") {
-                                Task { await vm.remove(hash: hash, deleteFiles: false) }
+                        Button {
+                            Task {
+                                for t in selectedTorrents { await vm.forceRecheck(hash: t.infoHash) }
                             }
-                            Button("Remove torrent and delete files", role: .destructive) {
-                                Task { await vm.remove(hash: hash, deleteFiles: true) }
+                        } label: {
+                            Label("Force Recheck", systemImage: "checkmark.seal")
+                        }
+
+                        Menu {
+                            Button("Remove torrent\(selectedHashes.count > 1 ? "s" : "") (keep files)") {
+                                Task {
+                                    for t in selectedTorrents {
+                                        await vm.remove(hash: t.infoHash, deleteFiles: false)
+                                    }
+                                }
+                            }
+                            Button("Remove torrent\(selectedHashes.count > 1 ? "s" : "") and delete files", role: .destructive) {
+                                Task {
+                                    for t in selectedTorrents {
+                                        await vm.remove(hash: t.infoHash, deleteFiles: true)
+                                    }
+                                }
                             }
                         } label: {
                             Label("Remove", systemImage: "trash")
+                        }
+
+                        if selectedHashes.count > 1 {
+                            Text("\(selectedHashes.count) selected")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
 
@@ -453,6 +655,23 @@ struct TorrentsView: View {
         .sheet(isPresented: $addOpen) {
             addMagnetSheet
                 .frame(minWidth: 460, minHeight: 220)
+        }
+        .sheet(item: Binding(
+            get: { vm.pendingDuplicate },
+            set: { if $0 == nil { vm.dismissPendingDuplicate() } }
+        )) { dup in
+            DuplicateTorrentPromptSheet(
+                infoHash: dup.infoHash,
+                existingName: vm.torrents.first(where: { $0.infoHash == dup.infoHash })?.name,
+                incomingTrackers: dup.incomingTrackers,
+                onMerge: {
+                    Task { await vm.resolvePendingDuplicateByMerging() }
+                },
+                onIgnore: {
+                    vm.dismissPendingDuplicate()
+                }
+            )
+            .frame(minWidth: 460, minHeight: 280)
         }
     }
 
@@ -727,6 +946,52 @@ struct CategoriesView: View {
                             .lineLimit(1).truncationMode(.middle)
                     }
                     .tag(c.name)
+                    .contextMenu {
+                        Button {
+                            selectedName = c.name
+                            editing = c
+                        } label: {
+                            Label("Edit…", systemImage: "pencil")
+                        }
+                        Button {
+                            selectedName = c.name
+                        } label: {
+                            Label("View Torrents", systemImage: "list.bullet")
+                        }
+                        Button {
+                            NSWorkspace.shared.open(URL(fileURLWithPath: c.savePath, isDirectory: true))
+                        } label: {
+                            Label("Open Save Path in Finder", systemImage: "folder")
+                        }
+                        if let completePath = c.completePath, !completePath.isEmpty {
+                            Button {
+                                NSWorkspace.shared.open(URL(fileURLWithPath: completePath, isDirectory: true))
+                            } label: {
+                                Label("Open Complete Path in Finder", systemImage: "folder.badge.gearshape")
+                            }
+                        }
+                        Divider()
+                        Button {
+                            let pb = NSPasteboard.general
+                            pb.clearContents()
+                            pb.setString(c.name, forType: .string)
+                        } label: {
+                            Label("Copy Name", systemImage: "doc.on.doc")
+                        }
+                        Button {
+                            let pb = NSPasteboard.general
+                            pb.clearContents()
+                            pb.setString(c.savePath, forType: .string)
+                        } label: {
+                            Label("Copy Save Path", systemImage: "doc.on.doc")
+                        }
+                        Divider()
+                        Button(role: .destructive) {
+                            Task { await vm.deleteCategory(named: c.name) }
+                        } label: {
+                            Label("Delete Category", systemImage: "trash")
+                        }
+                    }
                 }
                 Divider()
                 HStack {
@@ -1165,6 +1430,15 @@ struct SettingsView: View {
                     Text("Never move files").tag(CategoryMovePolicy.never)
                 }
                 Text("Controls what happens when a torrent is reassigned to a different category. The native UI always prompts; the WebAPI uses this default when its `moveFiles` flag is omitted.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Duplicate torrents") {
+                Picker("When a torrent is added twice", selection: binding.duplicateTorrentPolicy) {
+                    Text("Ignore the re-add").tag(DuplicateTorrentPolicy.ignore)
+                    Text("Merge new trackers into existing torrent").tag(DuplicateTorrentPolicy.mergeTrackers)
+                    Text("Ask each time (native UI only)").tag(DuplicateTorrentPolicy.ask)
+                }
+                Text("Controls what happens when a magnet or .torrent is added whose info-hash matches a torrent already in the session. qBittorrent-style behavior is \u{201C}Merge new trackers\u{201D}. WebUI / *arr callers with \u{201C}Ask\u{201D} selected fall back to \u{201C}Merge\u{201D} since there is no interactive operator at that end.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -2030,4 +2304,83 @@ func formatBytes(_ bytes: Int64) -> String {
     let formatter = ByteCountFormatter()
     formatter.countStyle = .binary
     return formatter.string(fromByteCount: bytes)
+}
+
+// MARK: - Duplicate torrent prompt
+
+/// Shown when a magnet / .torrent is added whose info-hash is already
+/// in the session and the active `DuplicateTorrentPolicy` is `.ask`.
+/// Offers the operator three paths: merge the incoming trackers into
+/// the existing torrent (qBittorrent's default behavior), ignore the
+/// re-add entirely, or cancel.
+struct DuplicateTorrentPromptSheet: View {
+    let infoHash: String
+    let existingName: String?
+    let incomingTrackers: [String]
+    let onMerge: () -> Void
+    let onIgnore: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Torrent already in library")
+                        .font(.headline)
+                    if let name = existingName {
+                        Text(name)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    Text(infoHash)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
+            Text("The incoming request contains \(incomingTrackers.count) tracker\(incomingTrackers.count == 1 ? "" : "s"). You can merge them into the existing torrent, or ignore this add.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            if !incomingTrackers.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(incomingTrackers, id: \.self) { url in
+                            Text(url)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 120)
+                .padding(8)
+                .background(.quaternary.opacity(0.4))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
+            Spacer()
+
+            HStack {
+                Button("Cancel") { onIgnore(); dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Ignore") { onIgnore(); dismiss() }
+                Button("Merge Trackers") { onMerge(); dismiss() }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(incomingTrackers.isEmpty)
+            }
+        }
+        .padding(18)
+    }
 }

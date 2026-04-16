@@ -181,6 +181,52 @@ public enum TorrentEngineError: Error, LocalizedError {
     }
 }
 
+/// Outcome of an add-request. Differentiates new adds from duplicates so
+/// callers (WebUI, *arr, native UI) can react appropriately — e.g. the
+/// native UI can surface a duplicate-prompt sheet, while qBittorrent-API
+/// callers just return 200 OK.
+public enum TorrentAddResult: Sendable {
+    /// A brand-new torrent was added. Payload is the info-hash.
+    case added(infoHash: String)
+    /// An incoming add matched an existing info-hash. Policy was
+    /// `.ignore` — nothing changed.
+    case duplicateIgnored(infoHash: String)
+    /// An incoming add matched an existing info-hash. Policy was
+    /// `.mergeTrackers` (or `.ask` falling back to merge for
+    /// non-interactive callers) — `added` new trackers were unioned
+    /// into the existing torrent.
+    case duplicateMergedTrackers(infoHash: String, added: Int)
+    /// An incoming add matched an existing info-hash. Policy is `.ask`
+    /// and the caller is interactive — UI should prompt the operator
+    /// with `incomingTrackers`.
+    case duplicatePrompt(infoHash: String, incomingTrackers: [String])
+
+    public var infoHash: String {
+        switch self {
+        case .added(let h),
+             .duplicateIgnored(let h),
+             .duplicateMergedTrackers(let h, _),
+             .duplicatePrompt(let h, _):
+            return h
+        }
+    }
+
+    public var isDuplicate: Bool {
+        if case .added = self { return false }
+        return true
+    }
+}
+
+/// Policy value passed to `addMagnet` / `addTorrentFile` so callers can
+/// pick the runtime behavior without the engine having to read
+/// `Settings`. Mirrors `DuplicateTorrentPolicy` — kept separate to avoid
+/// a Persistence dependency in the engine module.
+public enum DuplicatePolicyMode: Sendable {
+    case ignore
+    case mergeTrackers
+    case ask
+}
+
 /// Callback the engine uses to resolve a category name to its save path,
 /// without taking a hard dependency on the Persistence module. Closure
 /// form so any layer above the engine can supply one without conforming
@@ -285,6 +331,149 @@ public actor TorrentEngine {
         let hash = latestHashFromSnapshot()
         if let hash, let category { categoryByHash[hash] = category }
         return hash ?? ""
+    }
+
+    // MARK: Adding (duplicate-aware)
+
+    /// Duplicate-aware magnet add. Checks info-hash against the current
+    /// session before dispatching, and applies the given policy if the
+    /// hash is already present.
+    ///
+    /// - Parameters:
+    ///   - uri: magnet: URI
+    ///   - category: optional category name to associate with the torrent
+    ///   - explicitSavePath: overrides category-resolved save path
+    ///   - policy: what to do on duplicate
+    ///   - interactive: whether the caller can surface a prompt. Non-
+    ///     interactive callers (qBittorrent API, *arr, daemon) receive
+    ///     `.duplicateMergedTrackers` instead of `.duplicatePrompt` when
+    ///     policy is `.ask`.
+    public func addMagnet(
+        _ uri: String,
+        category: String? = nil,
+        explicitSavePath: String? = nil,
+        policy: DuplicatePolicyMode,
+        interactive: Bool
+    ) async throws -> TorrentAddResult {
+        guard let incomingHash = session.infoHash(forMagnet: uri),
+              !incomingHash.isEmpty else {
+            // Couldn't parse info-hash — fall through to the legacy path
+            // which will surface the real parse error.
+            let h = try await addMagnet(uri, category: category, explicitSavePath: explicitSavePath)
+            return .added(infoHash: h)
+        }
+
+        if session.hasTorrent(incomingHash) {
+            let incomingTrackers = session.trackers(inMagnet: uri)
+            return applyDuplicatePolicy(
+                infoHash: incomingHash,
+                incomingTrackers: incomingTrackers,
+                policy: policy,
+                interactive: interactive
+            )
+        }
+
+        let h = try await addMagnet(uri, category: category, explicitSavePath: explicitSavePath)
+        return .added(infoHash: h)
+    }
+
+    /// Duplicate-aware .torrent file add. Same semantics as
+    /// `addMagnet(…, policy:interactive:)`.
+    public func addTorrentFile(
+        at path: URL,
+        category: String? = nil,
+        explicitSavePath: String? = nil,
+        policy: DuplicatePolicyMode,
+        interactive: Bool
+    ) async throws -> TorrentAddResult {
+        guard let incomingHash = session.infoHash(forTorrentFile: path.path),
+              !incomingHash.isEmpty else {
+            let h = try await addTorrentFile(at: path, category: category, explicitSavePath: explicitSavePath)
+            return .added(infoHash: h)
+        }
+
+        if session.hasTorrent(incomingHash) {
+            let incomingTrackers = session.trackers(inTorrentFile: path.path)
+            return applyDuplicatePolicy(
+                infoHash: incomingHash,
+                incomingTrackers: incomingTrackers,
+                policy: policy,
+                interactive: interactive
+            )
+        }
+
+        let h = try await addTorrentFile(at: path, category: category, explicitSavePath: explicitSavePath)
+        return .added(infoHash: h)
+    }
+
+    private func applyDuplicatePolicy(
+        infoHash: String,
+        incomingTrackers: [String],
+        policy: DuplicatePolicyMode,
+        interactive: Bool
+    ) -> TorrentAddResult {
+        switch policy {
+        case .ignore:
+            return .duplicateIgnored(infoHash: infoHash)
+        case .mergeTrackers:
+            let added = session.addTrackers(toTorrent: infoHash, trackers: incomingTrackers)
+            if added > 0 { invalidateSnapshotCache() }
+            return .duplicateMergedTrackers(infoHash: infoHash, added: Int(added))
+        case .ask:
+            if interactive {
+                return .duplicatePrompt(infoHash: infoHash, incomingTrackers: incomingTrackers)
+            }
+            // Non-interactive caller: fall back to tracker merge so the
+            // re-add still accomplishes *something*.
+            let added = session.addTrackers(toTorrent: infoHash, trackers: incomingTrackers)
+            if added > 0 { invalidateSnapshotCache() }
+            return .duplicateMergedTrackers(infoHash: infoHash, added: Int(added))
+        }
+    }
+
+    /// Union-merge the given tracker URLs into an existing torrent.
+    /// Returns the number of trackers actually added (duplicates are
+    /// skipped).
+    @discardableResult
+    public func addTrackers(_ trackers: [String], to infoHash: String) -> Int {
+        let added = Int(session.addTrackers(toTorrent: infoHash, trackers: trackers))
+        if added > 0 { invalidateSnapshotCache() }
+        return added
+    }
+
+    /// Force a libtorrent piece-hash recheck against on-disk files.
+    /// Equivalent to qBittorrent's "Force recheck". Useful when the user
+    /// already has most of the data on disk and wants to skip
+    /// redownloading — libtorrent will hash every file and only the
+    /// pieces that don't match get queued.
+    @discardableResult
+    public func forceRecheck(infoHash: String) -> Bool {
+        let ok = session.forceRecheckTorrent(infoHash)
+        if ok { invalidateSnapshotCache() }
+        return ok
+    }
+
+    /// Returns true if the session already contains a torrent with the
+    /// given info-hash. Useful for UI-level duplicate checks.
+    public func hasTorrent(infoHash: String) -> Bool {
+        session.hasTorrent(infoHash)
+    }
+
+    /// Parse an incoming magnet URI and return its info-hash without
+    /// adding it to the session. Returns nil if the URI is malformed.
+    public func infoHash(forMagnet uri: String) -> String? {
+        session.infoHash(forMagnet: uri)
+    }
+
+    /// Same as `infoHash(forMagnet:)` for .torrent files.
+    public func infoHash(forTorrentFile path: URL) -> String? {
+        session.infoHash(forTorrentFile: path.path)
+    }
+
+    /// Reconstruct a magnet: URI for an already-added torrent. Returns
+    /// nil if metadata isn't available.
+    public func magnetLink(for infoHash: String) -> String? {
+        session.makeMagnet(forTorrent: infoHash)
     }
 
     private func resolvedSavePath(for category: String?) async throws -> String? {

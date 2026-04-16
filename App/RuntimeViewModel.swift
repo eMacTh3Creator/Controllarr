@@ -12,6 +12,7 @@
 //  accessory can read the same published state.
 //
 
+import AppKit
 import SwiftUI
 import Observation
 import ControllarrCore
@@ -46,6 +47,22 @@ final class RuntimeViewModel {
     var networkDiagnostics: NetworkDiagnostics.Snapshot?
     var arrNotifications: [ArrNotifier.Notification] = []
     var recoveryRecords: [RecoveryCenter.Record] = []
+
+    /// Present when a duplicate add-request came in and the active
+    /// `DuplicateTorrentPolicy` is `.ask`. The view layer reads this to
+    /// surface the prompt sheet; resolving the prompt (merge / ignore)
+    /// clears it.
+    struct PendingDuplicate: Identifiable {
+        let id = UUID()
+        let infoHash: String
+        let source: Source
+        let incomingTrackers: [String]
+        enum Source {
+            case magnet(uri: String, category: String?)
+            case torrentFile(url: URL, category: String?)
+        }
+    }
+    var pendingDuplicate: PendingDuplicate?
 
     // MARK: - Runtime
 
@@ -196,16 +213,76 @@ final class RuntimeViewModel {
 
     // MARK: - Actions
 
-    func addMagnet(_ uri: String, category: String?) async throws {
-        guard let runtime else { return }
-        _ = try await runtime.engine.addMagnet(uri, category: category)
+    /// Add a magnet using the active duplicate-policy. `interactive` should
+    /// be true for any path driven by the native UI — in that mode a
+    /// `.ask` policy will surface a prompt via `pendingDuplicate` instead
+    /// of silently merging trackers.
+    @discardableResult
+    func addMagnet(_ uri: String, category: String?, interactive: Bool = true) async throws -> TorrentAddResult {
+        guard let runtime else {
+            throw TorrentEngineError.addFailed("runtime not ready")
+        }
+        let mode = Self.bridgePolicy(settings.duplicateTorrentPolicy)
+        let result = try await runtime.engine.addMagnet(
+            uri,
+            category: category,
+            policy: mode,
+            interactive: interactive
+        )
+        if case let .duplicatePrompt(hash, trackers) = result {
+            self.pendingDuplicate = PendingDuplicate(
+                infoHash: hash,
+                source: .magnet(uri: uri, category: category),
+                incomingTrackers: trackers
+            )
+        }
+        await refreshFast()
+        return result
+    }
+
+    @discardableResult
+    func addTorrentFile(at url: URL, category: String?, interactive: Bool = true) async throws -> TorrentAddResult {
+        guard let runtime else {
+            throw TorrentEngineError.addFailed("runtime not ready")
+        }
+        let mode = Self.bridgePolicy(settings.duplicateTorrentPolicy)
+        let result = try await runtime.engine.addTorrentFile(
+            at: url,
+            category: category,
+            policy: mode,
+            interactive: interactive
+        )
+        if case let .duplicatePrompt(hash, trackers) = result {
+            self.pendingDuplicate = PendingDuplicate(
+                infoHash: hash,
+                source: .torrentFile(url: url, category: category),
+                incomingTrackers: trackers
+            )
+        }
+        await refreshFast()
+        return result
+    }
+
+    private static func bridgePolicy(_ p: DuplicateTorrentPolicy) -> DuplicatePolicyMode {
+        switch p {
+        case .ignore:         return .ignore
+        case .mergeTrackers:  return .mergeTrackers
+        case .ask:            return .ask
+        }
+    }
+
+    /// Resolve a pending duplicate-prompt by merging the incoming
+    /// trackers into the existing torrent.
+    func resolvePendingDuplicateByMerging() async {
+        guard let pending = pendingDuplicate, let runtime else { return }
+        _ = await runtime.engine.addTrackers(pending.incomingTrackers, to: pending.infoHash)
+        pendingDuplicate = nil
         await refreshFast()
     }
 
-    func addTorrentFile(at url: URL, category: String?) async throws {
-        guard let runtime else { return }
-        _ = try await runtime.engine.addTorrentFile(at: url, category: category)
-        await refreshFast()
+    /// Resolve a pending duplicate-prompt by ignoring the re-add.
+    func dismissPendingDuplicate() {
+        pendingDuplicate = nil
     }
 
     func pause(hash: String) async {
@@ -229,6 +306,65 @@ final class RuntimeViewModel {
     func reannounce(hash: String) async {
         guard let runtime else { return }
         _ = await runtime.engine.reannounce(infoHash: hash)
+    }
+
+    /// Force libtorrent to re-hash the torrent's on-disk files and
+    /// reconcile pieces. Equivalent to qBittorrent's "Force recheck".
+    func forceRecheck(hash: String) async {
+        guard let runtime else { return }
+        _ = await runtime.engine.forceRecheck(infoHash: hash)
+        await refreshFast()
+    }
+
+    /// Merge a list of tracker URLs into an existing torrent. Duplicates
+    /// are silently ignored by libtorrent.
+    @discardableResult
+    func addTrackers(_ trackers: [String], to hash: String) async -> Int {
+        guard let runtime else { return 0 }
+        let added = await runtime.engine.addTrackers(trackers, to: hash)
+        await refreshFast()
+        return added
+    }
+
+    /// Reveal a torrent's save path (or a specific file within it) in
+    /// Finder. Used by the Torrents right-click "Open in Finder" action.
+    func openInFinder(hash: String) {
+        guard let torrent = torrents.first(where: { $0.infoHash == hash }) else {
+            return
+        }
+        let savePathURL = URL(fileURLWithPath: torrent.savePath, isDirectory: true)
+        // If the torrent has a top-level file or folder matching its
+        // name, reveal that specifically so the user sees the content
+        // highlighted rather than the whole library folder.
+        let candidate = savePathURL.appendingPathComponent(torrent.name)
+        if FileManager.default.fileExists(atPath: candidate.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([candidate])
+            return
+        }
+        if FileManager.default.fileExists(atPath: savePathURL.path) {
+            NSWorkspace.shared.open(savePathURL)
+            return
+        }
+        // Last resort: open the category save path if we know it.
+        if let categoryName = torrent.category,
+           let category = categories.first(where: { $0.name == categoryName }) {
+            NSWorkspace.shared.open(URL(fileURLWithPath: category.savePath, isDirectory: true))
+        }
+    }
+
+    /// Copy a torrent's magnet URI to the pasteboard. Used from the
+    /// Torrents right-click context menu.
+    func copyMagnet(hash: String) async {
+        guard let runtime else { return }
+        // libtorrent can reconstruct a magnet from a live torrent_handle.
+        // The shim exposes this via stats(forInfoHash:).magnetURI, but
+        // for simplicity we stitch one from known fields when the shim
+        // API isn't available.
+        if let magnet = await runtime.engine.magnetLink(for: hash) {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(magnet, forType: .string)
+        }
     }
 
     func cyclePort() async {

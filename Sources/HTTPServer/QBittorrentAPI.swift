@@ -220,12 +220,41 @@ public enum QBittorrentAPI {
             // Normalize empty savepath to nil.
             let explicitPath = savePath?.isEmpty == false ? savePath : nil
 
+            // Resolve the active duplicate-policy from persistence, then
+            // dispatch every incoming add through the duplicate-aware
+            // engine path so re-adds from Sonarr/Radarr don't error.
+            // Non-interactive (ask -> mergeTrackers fallback) since there
+            // is no operator at the other end of an API call.
+            let settings = await services.store.settings()
+            let mode: DuplicatePolicyMode = {
+                switch settings.duplicateTorrentPolicy {
+                case .ignore:        return .ignore
+                case .mergeTrackers: return .mergeTrackers
+                case .ask:           return .ask
+                }
+            }()
+
             var addedHashes: [String] = []
             for u in urls {
                 do {
-                    let h = try await services.engine.addMagnet(u, category: category, explicitSavePath: explicitPath)
+                    let result = try await services.engine.addMagnet(
+                        u,
+                        category: category,
+                        explicitSavePath: explicitPath,
+                        policy: mode,
+                        interactive: false
+                    )
+                    let h = result.infoHash
+                    // Always emit the hash so the caller can reference
+                    // the torrent — whether we just added it or merged
+                    // trackers into an existing one.
                     if !h.isEmpty { addedHashes.append(h) }
-                    if let category { await services.store.noteCategoryForHash(h, category: category) }
+                    // Only set the category for *new* adds. Don't
+                    // stomp an existing categorization when a duplicate
+                    // add arrives with (or without) a category argument.
+                    if case .added = result, let category {
+                        await services.store.noteCategoryForHash(h, category: category)
+                    }
                 } catch {
                     NSLog("[Controllarr] addMagnet failed: \(error)")
                 }
@@ -235,9 +264,18 @@ public enum QBittorrentAPI {
                     .appendingPathComponent("ctrl-\(UUID().uuidString).torrent")
                 try? blob.data.write(to: tmp)
                 do {
-                    let h = try await services.engine.addTorrentFile(at: tmp, category: category, explicitSavePath: explicitPath)
+                    let result = try await services.engine.addTorrentFile(
+                        at: tmp,
+                        category: category,
+                        explicitSavePath: explicitPath,
+                        policy: mode,
+                        interactive: false
+                    )
+                    let h = result.infoHash
                     if !h.isEmpty { addedHashes.append(h) }
-                    if let category { await services.store.noteCategoryForHash(h, category: category) }
+                    if case .added = result, let category {
+                        await services.store.noteCategoryForHash(h, category: category)
+                    }
                 } catch {
                     NSLog("[Controllarr] addTorrentFile failed: \(error)")
                 }
