@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem?
     private var statsTimer: Timer?
+    private var statusLineItem: NSMenuItem?
 
     /// Files/URLs received before the runtime finishes booting.
     /// Drained once RuntimeViewModel.isBooting becomes false.
@@ -154,30 +155,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startStatusRefresh() {
         statsTimer?.invalidate()
         statsTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.rebuildMenu() }
+            Task { @MainActor [weak self] in self?.refreshStatusLine() }
         }
     }
 
-    private func rebuildMenu() {
-        statusItem?.menu = buildMenu()
+    private func refreshStatusLine() {
+        statusLineItem?.title = statusTitle()
     }
 
     private func buildMenu() -> NSMenu {
-        let vm = RuntimeViewModel.shared
-        let s = vm.session
-        let title: String
-        if vm.isBooting {
-            title = "Starting..."
-        } else {
-            title = "Port \(s.listenPort) \u{00B7} \(s.numTorrents) torrents \u{00B7} \u{2193}\(formatRate(s.downloadRate)) \u{2191}\(formatRate(s.uploadRate))"
-        }
-
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        let statusLine = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let statusLine = NSMenuItem(title: statusTitle(), action: nil, keyEquivalent: "")
         statusLine.isEnabled = false
         menu.addItem(statusLine)
+        self.statusLineItem = statusLine
 
         menu.addItem(.separator())
 
@@ -200,6 +193,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quit)
 
         return menu
+    }
+
+    private func statusTitle() -> String {
+        let vm = RuntimeViewModel.shared
+        let s = vm.session
+        if vm.isBooting {
+            return "Starting..."
+        }
+        return "Port \(s.listenPort) \u{00B7} \(s.numTorrents) torrents \u{00B7} \u{2193}\(formatRate(s.downloadRate)) \u{2191}\(formatRate(s.uploadRate))"
     }
 
     @objc private func showWindow() {

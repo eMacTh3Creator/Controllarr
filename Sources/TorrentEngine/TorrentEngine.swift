@@ -193,6 +193,13 @@ public let nullCategoryResolver: CategoryResolver = { _ in nil }
 
 public actor TorrentEngine {
 
+    struct CachedSnapshot {
+        let torrents: [TorrentStats]
+        let byHash: [String: TorrentStats]
+        let session: SessionStats
+        let capturedAt: Date
+    }
+
     public let defaultSavePath: URL
     public private(set) var listenPort: UInt16
 
@@ -209,6 +216,8 @@ public actor TorrentEngine {
     /// name. Populated from Persistence at add-time so the engine can
     /// apply priorities without needing another async round-trip.
     private var blockedExtensionsByCategory: [String: [String]] = [:]
+    private var cachedSnapshot: CachedSnapshot?
+    private let snapshotCacheTTL: TimeInterval = 0.5
 
     public init(
         defaultSavePath: URL,
@@ -247,6 +256,7 @@ public actor TorrentEngine {
         } catch {
             throw TorrentEngineError.addFailed(error.localizedDescription)
         }
+        invalidateSnapshotCache()
         // libtorrent doesn't return the hash from parse_magnet_uri via the
         // Obj-C bridge; walk the snapshot for a freshly-added torrent.
         let hash = latestHashFromSnapshot()
@@ -266,6 +276,7 @@ public actor TorrentEngine {
         } catch {
             throw TorrentEngineError.addFailed(error.localizedDescription)
         }
+        invalidateSnapshotCache()
         let hash = latestHashFromSnapshot()
         if let hash, let category { categoryByHash[hash] = category }
         return hash ?? ""
@@ -277,33 +288,48 @@ public actor TorrentEngine {
     }
 
     private func latestHashFromSnapshot() -> String? {
-        let all = session.pollStats()
         // Heuristic: whichever torrent has the most recent addedDate.
-        return all.max(by: { $0.addedDate < $1.addedDate })?.infoHash
+        materializeSnapshot(forceRefresh: true)
+            .torrents
+            .max(by: { $0.addedDate < $1.addedDate })?
+            .infoHash
     }
 
     // MARK: Mutating
 
     @discardableResult
-    public func pause(infoHash: String) -> Bool { session.pauseTorrent(infoHash) }
+    public func pause(infoHash: String) -> Bool {
+        let didPause = session.pauseTorrent(infoHash)
+        if didPause { invalidateSnapshotCache() }
+        return didPause
+    }
 
     @discardableResult
-    public func resume(infoHash: String) -> Bool { session.resumeTorrent(infoHash) }
+    public func resume(infoHash: String) -> Bool {
+        let didResume = session.resumeTorrent(infoHash)
+        if didResume { invalidateSnapshotCache() }
+        return didResume
+    }
 
     @discardableResult
     public func remove(infoHash: String, deleteFiles: Bool) -> Bool {
         categoryByHash.removeValue(forKey: infoHash)
-        return session.removeTorrent(infoHash, deleteFiles: deleteFiles)
+        let didRemove = session.removeTorrent(infoHash, deleteFiles: deleteFiles)
+        if didRemove { invalidateSnapshotCache() }
+        return didRemove
     }
 
     @discardableResult
     public func move(infoHash: String, to path: URL) -> Bool {
-        session.moveTorrent(infoHash, toPath: path.path)
+        let didMove = session.moveTorrent(infoHash, toPath: path.path)
+        if didMove { invalidateSnapshotCache() }
+        return didMove
     }
 
     public func setCategory(_ category: String?, for infoHash: String) {
         if let category { categoryByHash[infoHash] = category }
         else { categoryByHash.removeValue(forKey: infoHash) }
+        invalidateSnapshotCache()
     }
 
     /// Record a category's blocked extension list so the engine can
@@ -329,7 +355,9 @@ public actor TorrentEngine {
     /// Apply per-file download priorities directly. 0 = skip, 4 = normal.
     @discardableResult
     public func setFilePriorities(_ priorities: [Int], for infoHash: String) -> Bool {
-        session.setFilePriorities(priorities.map { NSNumber(value: $0) }, forInfoHash: infoHash)
+        let didSet = session.setFilePriorities(priorities.map { NSNumber(value: $0) }, forInfoHash: infoHash)
+        if didSet { invalidateSnapshotCache() }
+        return didSet
     }
 
     /// Ask libtorrent to immediately re-announce a single torrent.
@@ -392,7 +420,7 @@ public actor TorrentEngine {
     /// skip the blocked files. Idempotent — each hash is only processed
     /// once. Called on every poll tick by the runtime.
     public func applyPendingFileFilters() {
-        for torrent in session.pollStats() {
+        for torrent in materializeSnapshot(forceRefresh: true).torrents {
             let hash = torrent.infoHash
             if fileFilterApplied.contains(hash) { continue }
             guard let category = categoryByHash[hash],
@@ -415,30 +443,39 @@ public actor TorrentEngine {
             _ = session.setFilePriorities(priorities, forInfoHash: hash)
             fileFilterApplied.insert(hash)
         }
+        invalidateSnapshotCache()
     }
 
     // MARK: Reading
 
     public func pollStats() -> [TorrentStats] {
-        session.pollStats().map { bridge($0) }
+        materializeSnapshot().torrents
     }
 
     public func stats(for infoHash: String) -> TorrentStats? {
+        if let cached = cachedSnapshot,
+           Date().timeIntervalSince(cached.capturedAt) <= snapshotCacheTTL,
+           let torrent = cached.byHash[infoHash] {
+            return torrent
+        }
         guard let raw = session.stats(forInfoHash: infoHash) else { return nil }
         return bridge(raw)
     }
 
     public func sessionStats() -> SessionStats {
-        let s = session.sessionStats()
-        return SessionStats(
-            downloadRate: s.downloadRate,
-            uploadRate: s.uploadRate,
-            totalDownloaded: s.totalBytesDownloaded,
-            totalUploaded: s.totalBytesUploaded,
-            numTorrents: Int(s.numTorrents),
-            numPeersConnected: Int(s.numPeersConnected),
-            hasIncomingConnections: s.hasIncomingConnections,
-            listenPort: s.listenPort
+        materializeSnapshot().session
+    }
+
+    static func summarizeSession(torrents: [TorrentStats], listenPort: UInt16) -> SessionStats {
+        SessionStats(
+            downloadRate: torrents.reduce(into: 0) { $0 += $1.downloadRate },
+            uploadRate: torrents.reduce(into: 0) { $0 += $1.uploadRate },
+            totalDownloaded: torrents.reduce(into: 0) { $0 += $1.totalDownload },
+            totalUploaded: torrents.reduce(into: 0) { $0 += $1.totalUpload },
+            numTorrents: torrents.count,
+            numPeersConnected: torrents.reduce(into: 0) { $0 += $1.numPeers },
+            hasIncomingConnections: torrents.contains(where: { $0.numPeers > 0 }),
+            listenPort: listenPort
         )
     }
 
@@ -470,12 +507,14 @@ public actor TorrentEngine {
     public func setListenPort(_ port: UInt16) {
         self.listenPort = port
         session.setListenPort(port)
+        invalidateSnapshotCache()
     }
 
     /// Directly set libtorrent's listen_interfaces string. Used by VPN
     /// monitor to bind listen to the VPN adapter IP + current port.
     public func setListenInterfaces(_ interfaces: String) {
         session.setListenInterfacesString(interfaces)
+        invalidateSnapshotCache()
     }
 
     /// Bind all outgoing peer/tracker traffic to a specific network
@@ -483,15 +522,18 @@ public actor TorrentEngine {
     /// to OS default routing.
     public func setOutgoingInterface(_ name: String) {
         session.setOutgoingInterface(name)
+        invalidateSnapshotCache()
     }
 
     /// Set global download/upload rate limits. 0 = unlimited.
     public func setRateLimits(downloadKBps: Int?, uploadKBps: Int?) {
         session.setRateLimitsDownloadKBps(Int32(downloadKBps ?? 0), uploadKBps: Int32(uploadKBps ?? 0))
+        invalidateSnapshotCache()
     }
 
     public func forceReannounceAll() {
         session.forceReannounceAll()
+        invalidateSnapshotCache()
     }
 
     // MARK: Lifecycle
@@ -510,5 +552,41 @@ public actor TorrentEngine {
     // MARK: Direct category-map access for persistence round-trip
 
     public func snapshotCategories() -> [String: String] { categoryByHash }
-    public func restoreCategories(_ map: [String: String]) { categoryByHash = map }
+    public func restoreCategories(_ map: [String: String]) {
+        categoryByHash = map
+        invalidateSnapshotCache()
+    }
+
+    private func materializeSnapshot(forceRefresh: Bool = false) -> CachedSnapshot {
+        if !forceRefresh,
+           let cachedSnapshot,
+           Date().timeIntervalSince(cachedSnapshot.capturedAt) <= snapshotCacheTTL {
+            return cachedSnapshot
+        }
+
+        let raw = session.pollStats()
+        var torrents: [TorrentStats] = []
+        torrents.reserveCapacity(raw.count)
+        var byHash: [String: TorrentStats] = [:]
+        byHash.reserveCapacity(raw.count)
+
+        for item in raw {
+            let bridged = bridge(item)
+            torrents.append(bridged)
+            byHash[bridged.infoHash] = bridged
+        }
+
+        let snapshot = CachedSnapshot(
+            torrents: torrents,
+            byHash: byHash,
+            session: Self.summarizeSession(torrents: torrents, listenPort: listenPort),
+            capturedAt: Date()
+        )
+        cachedSnapshot = snapshot
+        return snapshot
+    }
+
+    private func invalidateSnapshotCache() {
+        cachedSnapshot = nil
+    }
 }

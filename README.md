@@ -8,7 +8,7 @@
 
 Controllarr uses [libtorrent-rasterbar](https://www.libtorrent.org/) as its engine and wraps it in a Swift + SwiftUI desktop app with both a native macOS window and an embedded React web UI. It speaks the qBittorrent Web API so existing *arr apps can point at it with zero extra configuration.
 
-**Status:** v1.2.1 — production-ready `.app` with native UI, qBittorrent Web API compatibility, React WebUI, post-processing pipeline, seeding policy, health monitoring, bandwidth scheduler, per-torrent file/tracker/peer detail, Keychain credential storage, disk-space-aware auto-pause, *arr re-search integration, VPN-aware kill switch with interface binding, drag-and-drop `.torrent` support, recovery center with rule chaining, backup/restore, and built-in network diagnostics for remote LAN access troubleshooting. See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
+**Status:** v1.3.0 — production-ready `.app` with native UI, qBittorrent Web API compatibility, React WebUI, post-processing pipeline, seeding policy, health monitoring, bandwidth scheduler, per-torrent file/tracker/peer detail, Keychain credential storage, disk-space-aware auto-pause, *arr re-search integration, VPN-aware kill switch with interface binding, drag-and-drop `.torrent` support, recovery center with rule chaining, backup/restore, built-in network diagnostics, and a large-library performance pass aimed at keeping 1,000+ torrent sessions responsive without constant rescans. See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
 
 The next major step is a larger **v1.5** release that turns Controllarr from "a Mac-native qBittorrent replacement for *arr apps" into a true download orchestration platform with deeper automation, remote operations, security, and observability. The current roadmap lives in [docs/V1_5_ROADMAP.md](docs/V1_5_ROADMAP.md).
 
@@ -30,6 +30,7 @@ Initial v1.5 foundation work is already landing on `main`: there is now a headle
 - **VPN kill switch** — detects VPN tunnel interfaces (PIA, WireGuard, etc.) and pauses all torrents instantly when the VPN drops; auto-resumes on reconnect
 - **VPN interface binding** — binds libtorrent's outgoing and listen interfaces to the VPN adapter so torrent traffic never leaks through the default route
 - **Network diagnostics** — show bind host, LAN IPs, VPN interface, recommended remote URLs, and warnings when the VPN client is likely blocking LAN ingress
+- **Large-library performance tuning** — shared torrent snapshot caching, single-pass session aggregation, balanced libtorrent I/O thread tuning, and lower-overhead polling across the runtime, native UI, and WebUI
 - **Disk-space-aware auto-pause** — monitors free space, pauses downloads when below threshold, and exposes operator recheck telemetry in the WebUI
 - ***arr re-search integration** — proactive Sonarr/Radarr callbacks when torrents stall
 - **Session auth with expiry** — 1-hour token TTL, CORS support, cookie-based middleware
@@ -38,7 +39,7 @@ Initial v1.5 foundation work is already landing on `main`: there is now a headle
 - **Recovery rules and recovery center** — automatically respond to unhealthy torrents, keep an action history of automatic/manual recovery attempts, and pair with manual post-processing retries
 - **Per-torrent save path** — `savepath` override from *arr apps wired through to libtorrent
 - **.torrent file upload** from the browser WebUI (drag-and-drop or file picker)
-- **45-test suite** covering schema migration, archive detection, recovery planning with rule chaining, network diagnostics, post-processing retries, Keychain ops, disk-space, *arr endpoints, and VPN monitor
+- **47-test suite** covering schema migration, archive detection, recovery planning with rule chaining, network diagnostics, post-processing retries, session-summary performance math, Keychain ops, disk-space, *arr endpoints, and VPN monitor
 - **Sparkle auto-update** — checks for new versions via appcast and installs in-place
 - **Modern React web UI** with live stats, log viewer, settings editor, full category management, and torrent file upload
 
@@ -60,7 +61,9 @@ If you want the detailed feature slate, recommended scope, and stretch goals, st
 
 - [docs/README.md](docs/README.md) — documentation index
 - [docs/OPERATIONS.md](docs/OPERATIONS.md) — headless daemon usage, backup/export/restore, recovery rules, post-processing retries, and disk-space operations
+- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — large-library behavior, runtime polling model, and scaling guidance for 1,000+ torrents
 - [docs/V1_5_ROADMAP.md](docs/V1_5_ROADMAP.md) — proposed big-ticket roadmap for the v1.5 release
+- [RELEASE_NOTES_v1.3.0.md](RELEASE_NOTES_v1.3.0.md) — performance and scalability improvements for large torrent libraries
 - [RELEASE_NOTES_v1.2.1.md](RELEASE_NOTES_v1.2.1.md) — network diagnostics and remote-LAN VPN troubleshooting
 - [RELEASE_NOTES_v0.2.0.md](RELEASE_NOTES_v0.2.0.md) — native UI, post-processing, seeding policy, and health monitor release
 - [RELEASE_NOTES_v0.3.0.md](RELEASE_NOTES_v0.3.0.md) — torrent detail panes, trackers/peers, bandwidth scheduler, and API expansion

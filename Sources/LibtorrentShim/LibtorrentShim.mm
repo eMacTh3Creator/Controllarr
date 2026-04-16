@@ -152,6 +152,17 @@ static NSString *ctrl_build_listen_interfaces(uint16_t port, BOOL bindAll) {
     return [NSString stringWithFormat:@"0.0.0.0:%u,[::]:%u", port, port];
 }
 
+static int ctrl_balanced_aio_threads() {
+    NSInteger cores = NSProcessInfo.processInfo.activeProcessorCount;
+    NSInteger tuned = MAX(2, MIN(8, (cores + 1) / 2));
+    return (int)tuned;
+}
+
+static int ctrl_balanced_hashing_threads() {
+    NSInteger cores = NSProcessInfo.processInfo.activeProcessorCount;
+    return cores >= 8 ? 2 : 1;
+}
+
 // MARK: - CTRLSession
 
 @implementation CTRLSession {
@@ -175,12 +186,15 @@ static NSString *ctrl_build_listen_interfaces(uint16_t port, BOOL bindAll) {
         lt::settings_pack pack;
         pack.set_str(lt::settings_pack::listen_interfaces,
                      ctrl_build_listen_interfaces(port, bindAll).UTF8String);
-        pack.set_str(lt::settings_pack::user_agent, "Controllarr/0.1.0 libtorrent/2.0");
+        pack.set_str(lt::settings_pack::user_agent, "Controllarr/1.3.0 libtorrent/2.0");
         pack.set_int(lt::settings_pack::alert_mask,
                      lt::alert_category::error
                      | lt::alert_category::status
                      | lt::alert_category::storage
                      | lt::alert_category::performance_warning);
+        pack.set_int(lt::settings_pack::alert_queue_size, 4096);
+        pack.set_int(lt::settings_pack::aio_threads, ctrl_balanced_aio_threads());
+        pack.set_int(lt::settings_pack::hashing_threads, ctrl_balanced_hashing_threads());
         // Respect NAT-PMP / UPnP so the port watcher has something to
         // cross-check against.
         pack.set_bool(lt::settings_pack::enable_upnp, true);
@@ -189,7 +203,13 @@ static NSString *ctrl_build_listen_interfaces(uint16_t port, BOOL bindAll) {
         pack.set_bool(lt::settings_pack::enable_lsd, false); // too noisy on mac
 
         _session = std::make_unique<lt::session>(pack);
-        NSLog(@"[Controllarr] session up: port=%u save=%@", port, _savePath);
+        NSLog(
+            @"[Controllarr] session up: port=%u save=%@ aio_threads=%d hashing_threads=%d",
+            port,
+            _savePath,
+            ctrl_balanced_aio_threads(),
+            ctrl_balanced_hashing_threads()
+        );
     }
     return self;
 }

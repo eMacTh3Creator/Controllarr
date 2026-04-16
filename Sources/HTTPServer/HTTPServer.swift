@@ -104,7 +104,7 @@ public actor HTTPServer {
             router: router,
             configuration: .init(
                 address: .hostname(configuration.host, port: configuration.port),
-                serverName: "Controllarr/1.0"
+                serverName: Self.serverName
             )
         )
 
@@ -124,6 +124,14 @@ public actor HTTPServer {
     public func stop() async {
         runTask?.cancel()
         runTask = nil
+    }
+
+    private static var serverName: String {
+        if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+           !version.isEmpty {
+            return "Controllarr/\(version)"
+        }
+        return "Controllarr/1.3.0"
     }
 }
 

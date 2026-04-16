@@ -73,7 +73,7 @@ enum StaticWebUI {
         h1{margin:0 0 .25rem}h1 span{opacity:.6;font-weight:400;font-size:.6em}
         code{background:#1b1e26;padding:2px 6px;border-radius:4px}</style></head>
         <body>
-        <h1>Controllarr <span>v0.1 Phase 1</span></h1>
+        <h1>Controllarr <span>WebUI bundle missing</span></h1>
         <p>The React WebUI has not been built yet. Run:</p>
         <pre><code>cd WebUI && npm install && npm run build</code></pre>
         <p>Then relaunch Controllarr. The qBittorrent Web API is live at

@@ -62,6 +62,8 @@ type LiveSnapshot = {
   log: LogEntry[]
 }
 
+type LiveSnapshotPatch = Partial<LiveSnapshot>
+
 type CategoryModalState =
   | { mode: 'new' }
   | { mode: 'edit'; category: Category }
@@ -145,57 +147,123 @@ export function App() {
   const deferredLogFilter = useDeferredValue(logFilter)
   const currentTab = TABS.find((tab) => tab.id === activeTab) ?? TABS[0]
 
+  const fetchLiveSnapshot = useCallback(async (mode: 'all' | 'active'): Promise<LiveSnapshotPatch> => {
+    if (mode === 'all') {
+      const [
+        torrents,
+        stats,
+        categories,
+        health,
+        recovery,
+        postProcessor,
+        seeding,
+        log,
+      ] = await Promise.all([
+        api.torrents(),
+        api.stats(),
+        api.categories(),
+        api.health(),
+        api.recovery(),
+        api.postProcessor(),
+        api.seeding(),
+        api.log(500),
+      ])
+
+      return {
+        torrents,
+        stats,
+        categories,
+        health,
+        recovery,
+        postProcessor,
+        seeding,
+        log,
+      }
+    }
+
+    const [torrents, stats, activePayload] = await Promise.all([
+      api.torrents(),
+      api.stats(),
+      (async (): Promise<LiveSnapshotPatch> => {
+        switch (activeTab) {
+          case 'torrents':
+          case 'categories':
+            return { categories: await api.categories() }
+          case 'health':
+            return { health: await api.health() }
+          case 'recovery':
+            return { recovery: await api.recovery() }
+          case 'postprocessor':
+            return { postProcessor: await api.postProcessor() }
+          case 'seeding':
+            return { seeding: await api.seeding() }
+          case 'log':
+            return { log: await api.log(200) }
+          case 'settings':
+            return {}
+          default:
+            return {}
+        }
+      })(),
+    ])
+
+    const patch: LiveSnapshotPatch = {
+      torrents,
+      stats,
+      ...activePayload,
+    }
+
+    return patch
+  }, [activeTab])
+
   const fetchDashboard = useCallback(
     async ({
       includeSettings,
       silent,
       forceSettingsSync = false,
+      liveMode,
     }: {
       includeSettings: boolean
       silent: boolean
       forceSettingsSync?: boolean
+      liveMode: 'all' | 'active'
     }) => {
       if (!silent) setIsLoading(true)
 
       try {
-        const livePromise = Promise.all([
-          api.torrents(),
-          api.stats(),
-          api.categories(),
-          api.health(),
-          api.recovery(),
-          api.postProcessor(),
-          api.seeding(),
-          api.log(500),
-        ])
+        const livePromise = fetchLiveSnapshot(liveMode)
 
         const settingsPromise = includeSettings
           ? api.settings()
           : Promise.resolve<Settings | null>(null)
 
-        const [
-          torrents,
-          stats,
-          categories,
-          health,
-          recovery,
-          postProcessor,
-          seeding,
-          log,
-          nextSettings,
-        ] = [...(await livePromise), await settingsPromise]
+        const [live, nextSettings] = await Promise.all([livePromise, settingsPromise])
 
         startTransition(() => {
-          setSnapshot({
-            torrents: sortedCopy(torrents, (a, b) => b.added_on - a.added_on),
-            stats,
-            categories: sortedCopy(categories, (a, b) => a.name.localeCompare(b.name)),
-            health: sortedCopy(health, (a, b) => b.lastUpdated - a.lastUpdated),
-            recovery: sortedCopy(recovery, (a, b) => b.timestamp - a.timestamp),
-            postProcessor: sortedCopy(postProcessor, (a, b) => b.lastUpdated - a.lastUpdated),
-            seeding: sortedCopy(seeding, (a, b) => b.timestamp - a.timestamp),
-            log: sortedCopy(log, (a, b) => b.timestamp - a.timestamp),
-          })
+          setSnapshot((current) => ({
+            torrents: live.torrents
+              ? sortedCopy(live.torrents, (a, b) => b.added_on - a.added_on)
+              : current.torrents,
+            stats: live.stats ?? current.stats,
+            categories: live.categories
+              ? sortedCopy(live.categories, (a, b) => a.name.localeCompare(b.name))
+              : current.categories,
+            health: live.health
+              ? sortedCopy(live.health, (a, b) => b.lastUpdated - a.lastUpdated)
+              : current.health,
+            recovery: live.recovery
+              ? sortedCopy(live.recovery, (a, b) => b.timestamp - a.timestamp)
+              : current.recovery,
+            postProcessor: live.postProcessor
+              ? sortedCopy(live.postProcessor, (a, b) => b.lastUpdated - a.lastUpdated)
+              : current.postProcessor,
+            seeding: live.seeding
+              ? sortedCopy(live.seeding, (a, b) => b.timestamp - a.timestamp)
+              : current.seeding,
+            log: live.log
+              ? sortedCopy(live.log, (a, b) => b.timestamp - a.timestamp)
+              : current.log,
+          }))
 
           if (nextSettings) {
             const normalized = normalizeSettings(nextSettings)
@@ -216,19 +284,19 @@ export function App() {
         if (!silent) setIsLoading(false)
       }
     },
-    [settingsDirty],
+    [fetchLiveSnapshot, settingsDirty],
   )
 
   const refreshAll = useCallback(
     async (silent = false, forceSettingsSync = false) => {
-      await fetchDashboard({ includeSettings: true, silent, forceSettingsSync })
+      await fetchDashboard({ includeSettings: true, silent, forceSettingsSync, liveMode: 'all' })
     },
     [fetchDashboard],
   )
 
   const refreshLive = useCallback(
     async (silent = true) => {
-      await fetchDashboard({ includeSettings: false, silent })
+      await fetchDashboard({ includeSettings: false, silent, liveMode: 'active' })
     },
     [fetchDashboard],
   )
@@ -243,6 +311,11 @@ export function App() {
 
     return () => window.clearInterval(intervalId)
   }, [authed, refreshAll, refreshLive])
+
+  useEffect(() => {
+    if (!authed || !hasLoaded) return
+    void refreshLive(true)
+  }, [activeTab, authed, hasLoaded, refreshLive])
 
   // VPN status polling (5s when VPN is enabled in settings)
   useEffect(() => {

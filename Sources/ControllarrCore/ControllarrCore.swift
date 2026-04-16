@@ -170,11 +170,14 @@ public actor ControllarrRuntime {
             while !Task.isCancelled {
                 await engine.applyPendingFileFilters()
                 let torrents = await engine.pollStats()
-                await postProcessor.tick(torrents: torrents)
-                await seedingPolicy.tick(torrents: torrents)
-                await healthMonitor.tick(torrents: torrents)
-                await recoveryCenter.tick()
-                await arrNotifier.tick()
+                async let postTick: Void = postProcessor.tick(torrents: torrents)
+                async let seedingTick: Void = seedingPolicy.tick(torrents: torrents)
+                async let healthTick: Void = healthMonitor.tick(torrents: torrents)
+                _ = await (postTick, seedingTick, healthTick)
+
+                async let recoveryTick: Void = recoveryCenter.tick(torrents: torrents)
+                async let arrTick: Void = arrNotifier.tick(torrents: torrents)
+                _ = await (recoveryTick, arrTick)
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }

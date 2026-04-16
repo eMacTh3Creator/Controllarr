@@ -106,12 +106,12 @@ public actor RecoveryCenter {
 
     // MARK: - Tick (automatic)
 
-    public func tick() async {
+    public func tick(torrents: [TorrentStats]) async {
         let settings = await store.settings()
         let now = Date()
 
         // Gather unified issue list from all three sources.
-        let allIssues = await gatherIssues(at: now)
+        let allIssues = await gatherIssues(at: now, torrents: torrents)
         let liveHashes = Set(allIssues.map(\.infoHash))
 
         // Purge applied-rules for issues that no longer exist.
@@ -142,7 +142,7 @@ public actor RecoveryCenter {
     // MARK: - Manual recovery
 
     public func runRecovery(for hash: String, action overrideAction: RecoveryAction? = nil) async throws -> Record {
-        let allIssues = await gatherIssues(at: Date())
+        let allIssues = await gatherIssues(at: Date(), torrents: nil)
         guard let issue = allIssues.first(where: { $0.infoHash == hash }) else {
             throw Error.issueNotFound(hash)
         }
@@ -175,7 +175,7 @@ public actor RecoveryCenter {
 
     // MARK: - Issue gathering
 
-    private func gatherIssues(at now: Date) async -> [Issue] {
+    private func gatherIssues(at now: Date, torrents: [TorrentStats]?) async -> [Issue] {
         var issues: [Issue] = []
 
         // 1. Health monitor issues
@@ -224,9 +224,15 @@ public actor RecoveryCenter {
         //    the disk-space monitor so rules can escalate per-torrent.
         let dsStatus = await diskSpaceMonitor.snapshot()
         if dsStatus.isPaused {
-            let torrents = await engine.pollStats()
+            let torrentLookup: [String: TorrentStats]
+            if let torrents {
+                torrentLookup = Dictionary(uniqueKeysWithValues: torrents.map { ($0.infoHash, $0) })
+            } else {
+                let loaded = await engine.pollStats()
+                torrentLookup = Dictionary(uniqueKeysWithValues: loaded.map { ($0.infoHash, $0) })
+            }
             for hash in dsStatus.pausedHashes {
-                let name = torrents.first(where: { $0.infoHash == hash })?.name ?? hash
+                let name = torrentLookup[hash]?.name ?? hash
                 let key = "\(hash)-\(RecoveryTrigger.diskPressure.rawValue)"
                 let firstSeen = issueFirstSeen[key] ?? now
                 if issueFirstSeen[key] == nil {

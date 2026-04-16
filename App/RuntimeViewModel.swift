@@ -50,7 +50,13 @@ final class RuntimeViewModel {
     // MARK: - Runtime
 
     private(set) var runtime: ControllarrRuntime?
-    private var pollTask: Task<Void, Never>?
+    private var fastPollTask: Task<Void, Never>?
+    private var slowPollTask: Task<Void, Never>?
+    private var isRefreshingFast = false
+    private var isRefreshingSlow = false
+
+    private let fastRefreshInterval: UInt64 = 2_000_000_000
+    private let slowRefreshInterval: UInt64 = 10_000_000_000
 
     private init() {}
 
@@ -61,6 +67,7 @@ final class RuntimeViewModel {
         self.runtime = rt
         do {
             try await rt.start()
+            await refreshAll()
             isBooting = false
             startPolling()
             // Drain any .torrent files or magnet: links that arrived
@@ -75,68 +82,108 @@ final class RuntimeViewModel {
     }
 
     func shutdown() async {
-        pollTask?.cancel()
-        pollTask = nil
+        fastPollTask?.cancel()
+        slowPollTask?.cancel()
+        fastPollTask = nil
+        slowPollTask = nil
         await runtime?.shutdown()
     }
 
     private func startPolling() {
-        pollTask?.cancel()
-        pollTask = Task { [weak self] in
+        fastPollTask?.cancel()
+        slowPollTask?.cancel()
+        let fastInterval = fastRefreshInterval
+        let slowInterval = slowRefreshInterval
+
+        fastPollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.refresh()
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await self?.refreshFast()
+                try? await Task.sleep(nanoseconds: fastInterval)
+            }
+        }
+
+        slowPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refreshSlow()
+                try? await Task.sleep(nanoseconds: slowInterval)
             }
         }
     }
 
     func refresh() async {
-        guard let runtime else { return }
+        await refreshAll()
+    }
+
+    func refreshAll() async {
+        await refreshFast()
+        await refreshSlow()
+    }
+
+    func refreshFast() async {
+        guard let runtime, !isRefreshingFast else { return }
+        isRefreshingFast = true
+        defer { isRefreshingFast = false }
+
         let engine = runtime.engine
-        let store = runtime.store
         let pp = runtime.postProcessor
-        let sp = runtime.seedingPolicy
         let hm = runtime.healthMonitor
-        let logger = runtime.logger
         let dsm = runtime.diskSpaceMonitor
         let vpn = runtime.vpnMonitor
-        let an = runtime.arrNotifier
-        let rc = runtime.recoveryCenter
 
         async let t = engine.pollStats()
         async let s = engine.sessionStats()
-        async let c = store.categories()
-        async let st = store.settings()
         async let h = hm.snapshot()
         async let p = pp.snapshot()
-        async let sl = sp.snapshot()
         async let ds = dsm.snapshot()
         async let vp = vpn.snapshot()
+
+        let torrents = await t
+        let session = await s
+        let health = await h
+        let post = await p
+        let disk = await ds
+        let vpnStatus = await vp
+
+        self.torrents = torrents
+        self.session = session
+        self.healthIssues = health
+        self.postRecords = post
+        self.diskSpaceStatus = disk
+        self.vpnStatus = vpnStatus
+        self.networkDiagnostics = NetworkDiagnostics.snapshot(
+            bindHost: settings.webUIHost,
+            bindPort: settings.webUIPort,
+            vpnStatus: vpnStatus
+        )
+    }
+
+    func refreshSlow() async {
+        guard let runtime, !isRefreshingSlow else { return }
+        isRefreshingSlow = true
+        defer { isRefreshingSlow = false }
+
+        let store = runtime.store
+        let sp = runtime.seedingPolicy
+        let logger = runtime.logger
+        let an = runtime.arrNotifier
+        let rc = runtime.recoveryCenter
+
+        async let c = store.categories()
+        async let st = store.settings()
+        async let sl = sp.snapshot()
         async let ar = an.snapshot()
         async let rr = rc.snapshot()
         let log = await logger.snapshot(limit: 200)
 
-        let torrents = await t
-        let session = await s
         let categories = await c
         let settings = await st
-        let health = await h
-        let post = await p
         let seeding = await sl
-        let disk = await ds
-        let vpnStatus = await vp
         let arr = await ar
         let recovery = await rr
 
-        self.torrents = torrents
-        self.session = session
         self.categories = categories
         self.settings = settings
-        self.healthIssues = health
-        self.postRecords = post
         self.seedingLog = seeding
-        self.diskSpaceStatus = disk
-        self.vpnStatus = vpnStatus
         self.networkDiagnostics = NetworkDiagnostics.snapshot(
             bindHost: settings.webUIHost,
             bindPort: settings.webUIPort,
@@ -152,31 +199,31 @@ final class RuntimeViewModel {
     func addMagnet(_ uri: String, category: String?) async throws {
         guard let runtime else { return }
         _ = try await runtime.engine.addMagnet(uri, category: category)
-        await refresh()
+        await refreshFast()
     }
 
     func addTorrentFile(at url: URL, category: String?) async throws {
         guard let runtime else { return }
         _ = try await runtime.engine.addTorrentFile(at: url, category: category)
-        await refresh()
+        await refreshFast()
     }
 
     func pause(hash: String) async {
         guard let runtime else { return }
         _ = await runtime.engine.pause(infoHash: hash)
-        await refresh()
+        await refreshFast()
     }
 
     func resume(hash: String) async {
         guard let runtime else { return }
         _ = await runtime.engine.resume(infoHash: hash)
-        await refresh()
+        await refreshFast()
     }
 
     func remove(hash: String, deleteFiles: Bool) async {
         guard let runtime else { return }
         _ = await runtime.engine.remove(infoHash: hash, deleteFiles: deleteFiles)
-        await refresh()
+        await refreshFast()
     }
 
     func reannounce(hash: String) async {
@@ -193,43 +240,43 @@ final class RuntimeViewModel {
         guard let runtime else { return }
         await runtime.store.upsertCategory(category)
         await runtime.engine.registerBlockedExtensions(category.blockedExtensions, forCategory: category.name)
-        await refresh()
+        await refreshAll()
     }
 
     func deleteCategory(named name: String) async {
         guard let runtime else { return }
         await runtime.store.removeCategory(named: name)
-        await refresh()
+        await refreshAll()
     }
 
     func saveSettings(_ newSettings: Persistence.Settings) async {
         guard let runtime else { return }
         await runtime.store.replaceSettings(newSettings)
-        await refresh()
+        await refreshAll()
     }
 
     func clearHealthIssue(hash: String) async {
         guard let runtime else { return }
         await runtime.healthMonitor.clearIssue(hash: hash)
-        await refresh()
+        await refreshFast()
     }
 
     func runRecovery(hash: String, action: RecoveryAction? = nil) async throws {
         guard let runtime else { return }
         _ = try await runtime.recoveryCenter.runRecovery(for: hash, action: action)
-        await refresh()
+        await refreshAll()
     }
 
     func retryPostProcessor(hash: String) async throws {
         guard let runtime else { return }
         _ = try await runtime.postProcessor.retry(infoHash: hash)
-        await refresh()
+        await refreshAll()
     }
 
     func recheckDiskSpace() async {
         guard let runtime else { return }
         await runtime.diskSpaceMonitor.forceEvaluate()
-        await refresh()
+        await refreshFast()
     }
 
     func exportBackup(includeSecrets: Bool) async -> Data? {
@@ -242,7 +289,7 @@ final class RuntimeViewModel {
         guard let runtime else { return }
         let archive = try JSONDecoder().decode(BackupArchive.self, from: data)
         _ = try await runtime.store.restoreBackup(archive)
-        await refresh()
+        await refreshAll()
     }
 
     func openWebUI() {

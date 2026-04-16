@@ -51,7 +51,7 @@ public actor ArrNotifier {
 
     /// Called from the tick loop. Checks health issues and fires
     /// re-search requests for stalled torrents that exceed the threshold.
-    public func tick() async {
+    public func tick(torrents: [TorrentStats]) async {
         let settings = await store.settings()
         let endpoints = settings.arrEndpoints
         guard !endpoints.isEmpty else { return }
@@ -72,7 +72,7 @@ public actor ArrNotifier {
             // Determine which endpoint to use. Look up the torrent's category
             // to guess whether it's a movie (radarr) or show (sonarr).
             // If no category match, notify all endpoints.
-            let torrentCategory = await categoryForHash(issue.infoHash)
+            let torrentCategory = await categoryForHash(issue.infoHash, torrents: torrents)
             let matchedEndpoints = matchEndpoints(endpoints, category: torrentCategory)
 
             for ep in matchedEndpoints {
@@ -106,9 +106,11 @@ public actor ArrNotifier {
 
     // MARK: - Internals
 
-    private func categoryForHash(_ hash: String) async -> String? {
-        let torrents = await engine.pollStats()
-        return torrents.first(where: { $0.infoHash == hash })?.category
+    private func categoryForHash(_ hash: String, torrents: [TorrentStats]) async -> String? {
+        if let torrent = torrents.first(where: { $0.infoHash == hash }) {
+            return torrent.category
+        }
+        return await engine.stats(for: hash)?.category
     }
 
     /// Simple heuristic: if the category name contains "movie" or "radarr",

@@ -2,6 +2,24 @@
 
 This doc covers the first operator-focused v1.5 foundations that now exist on `main`.
 
+## Performance and Scale
+
+For large libraries, v1.3 changes the way Controllarr gathers and republishes state:
+
+- torrent/session snapshots are now cached briefly inside the engine so the runtime, native UI, WebUI, and API can reuse one libtorrent scan instead of forcing several back-to-back scans
+- the runtime fans post-processing, seeding policy, and health analysis out in parallel after a shared torrent snapshot is collected
+- the native app now splits fast-changing state from admin state, so torrents/session/health stay fresh while categories, logs, and recovery history refresh on a slower cadence
+- the WebUI now refreshes the active tab instead of pulling every table on every 2-second interval
+
+If you are running especially large libraries:
+
+- prefer the Release build or published app over Debug builds for any real load testing
+- prefer the headless daemon mode for always-on nodes that do not need the native window open all day
+- keep the Log tab and detailed tracker/peer views for active troubleshooting instead of leaving them open permanently
+- validate your own environment with Activity Monitor or Instruments, especially if your torrents live on slower external storage or network-mounted volumes
+
+Controllarr is tuned to scale much better now, but real-world performance still depends on the mix of active peers, trackers, disk speed, and the number of simultaneously changing torrents.
+
 ## Headless Daemon
 
 Controllarr can now run without the macOS app bundle:
