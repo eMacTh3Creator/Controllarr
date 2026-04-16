@@ -76,6 +76,15 @@ If you want the detailed feature slate, recommended scope, and stretch goals, st
 
 Download `Controllarr.zip` from the [latest release](https://github.com/eMacTh3Creator/Controllarr/releases/latest), unzip, and drag `Controllarr.app` into `/Applications`. On first launch you may need to right-click → Open since the binary is ad-hoc signed.
 
+If macOS still blocks launch, you can re-sign the app locally and clear the quarantine flag:
+
+```sh
+codesign --force --deep --sign - "/Applications/Controllarr.app" \
+  && xattr -rd com.apple.quarantine "/Applications/Controllarr.app"
+```
+
+If you installed Controllarr somewhere other than `/Applications`, replace the path in both commands.
+
 Controllarr launches with a native window and a menu-bar status item. The React Web UI is available at <http://127.0.0.1:8791> — default login is `admin` / `adminadmin`. Point Sonarr / Radarr at the same URL using the qBittorrent download client type.
 
 For Sonarr, Radarr, Overseerr, or a browser on another LAN machine, change the WebUI bind host to `0.0.0.0`, restart Controllarr, and then target the Mac's LAN IP such as `http://192.168.1.122:8791`. The `0.0.0.0` value is only for listening; the native app's **Open Web UI** action still opens loopback locally.

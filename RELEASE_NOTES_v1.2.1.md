@@ -13,3 +13,4 @@
 - For Sonarr, Radarr, Overseerr, or another browser on your LAN, bind the WebUI to `0.0.0.0`, restart Controllarr, and target the Mac's LAN IP such as `http://192.168.1.122:8791`
 - Torrent traffic remains bound separately to the VPN adapter when VPN interface binding is enabled
 - If the diagnostics panel reports that LAN access is configured correctly but remote machines still cannot connect with the VPN enabled, check the VPN client's local-network-access rules or firewall behavior
+- If macOS blocks the downloaded app from opening, you can self-sign it locally and clear quarantine with `codesign --force --deep --sign - "/Applications/Controllarr.app" && xattr -rd com.apple.quarantine "/Applications/Controllarr.app"`
