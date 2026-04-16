@@ -38,6 +38,8 @@ public actor HTTPServer {
         public let postProcessor: PostProcessor
         public let seedingPolicy: SeedingPolicy
         public let healthMonitor: HealthMonitor
+        public let diskSpaceMonitor: DiskSpaceMonitor
+        public let arrNotifier: ArrNotifier
         /// Closure the WebUI exposes as "cycle port now" — implemented by
         /// the PortWatcher. Kept as a closure so HTTPServer doesn't take a
         /// hard dependency on PortWatcher.
@@ -49,6 +51,8 @@ public actor HTTPServer {
             postProcessor: PostProcessor,
             seedingPolicy: SeedingPolicy,
             healthMonitor: HealthMonitor,
+            diskSpaceMonitor: DiskSpaceMonitor,
+            arrNotifier: ArrNotifier,
             forceCyclePort: @escaping @Sendable () async -> Void
         ) {
             self.engine = engine
@@ -57,6 +61,8 @@ public actor HTTPServer {
             self.postProcessor = postProcessor
             self.seedingPolicy = seedingPolicy
             self.healthMonitor = healthMonitor
+            self.diskSpaceMonitor = diskSpaceMonitor
+            self.arrNotifier = arrNotifier
             self.forceCyclePort = forceCyclePort
         }
     }

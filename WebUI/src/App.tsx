@@ -5,8 +5,11 @@ import {
   fetchTrackers,
   fetchPeers,
   setFilePriorities,
+  type ArrEndpoint,
+  type ArrNotification,
   type BandwidthScheduleRule,
   type Category,
+  type DiskSpaceStatus,
   type HealthIssue,
   type LogEntry,
   type PostProcessorRecord,
@@ -1248,6 +1251,20 @@ function SettingsTab({
         </section>
       </div>
 
+      <DiskSpaceMonitorSection
+        diskSpaceMinimumGB={settings.diskSpaceMinimumGB}
+        diskSpaceMonitorPath={settings.diskSpaceMonitorPath}
+        onMinimumGBChange={(value) => patch({ diskSpaceMinimumGB: value })}
+        onMonitorPathChange={(value) => patch({ diskSpaceMonitorPath: value })}
+      />
+
+      <ArrIntegrationSection
+        arrReSearchAfterHours={settings.arrReSearchAfterHours}
+        arrEndpoints={settings.arrEndpoints}
+        onReSearchHoursChange={(value) => patch({ arrReSearchAfterHours: value })}
+        onEndpointsChange={(endpoints) => patch({ arrEndpoints: endpoints })}
+      />
+
       <BandwidthScheduleSection
         rules={settings.bandwidthSchedule}
         onChange={(rules) => patch({ bandwidthSchedule: rules })}
@@ -1281,6 +1298,302 @@ function emptyScheduleRule(): BandwidthScheduleRule {
     maxDownloadKBps: 0,
     maxUploadKBps: 0,
   }
+}
+
+function DiskSpaceMonitorSection({
+  diskSpaceMinimumGB,
+  diskSpaceMonitorPath,
+  onMinimumGBChange,
+  onMonitorPathChange,
+}: {
+  diskSpaceMinimumGB: number | null
+  diskSpaceMonitorPath: string
+  onMinimumGBChange: (value: number | null) => void
+  onMonitorPathChange: (value: string) => void
+}) {
+  const [diskSpace, setDiskSpace] = useState<DiskSpaceStatus | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function poll() {
+      try {
+        const status = await api.diskSpace()
+        if (!cancelled) setDiskSpace(status)
+      } catch {
+        // best-effort — don't block settings UI
+      }
+    }
+
+    void poll()
+    const interval = window.setInterval(poll, 5_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [])
+
+  const enabled = diskSpaceMinimumGB !== null
+
+  return (
+    <section className="form-panel">
+      <div className="form-panel-header">
+        <h3>Disk Space Monitor</h3>
+        <p>Pause new downloads when free space drops below a threshold on the monitored volume.</p>
+      </div>
+
+      <div className="form-grid">
+        <label className="toggle-field">
+          <span>Enable disk space monitor</span>
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => onMinimumGBChange(e.currentTarget.checked ? 10 : null)}
+          />
+        </label>
+
+        {enabled && (
+          <>
+            <label className="field">
+              <span>Minimum free space (GB)</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={diskSpaceMinimumGB ?? 10}
+                onChange={(e) =>
+                  onMinimumGBChange(readNumber(e.currentTarget.valueAsNumber, diskSpaceMinimumGB ?? 10))
+                }
+              />
+            </label>
+
+            <label className="field wide">
+              <span>Monitor path</span>
+              <input
+                value={diskSpaceMonitorPath}
+                onChange={(e) => onMonitorPathChange(e.target.value)}
+                placeholder="/Volumes/Media or /Users/you/Downloads"
+              />
+            </label>
+          </>
+        )}
+      </div>
+
+      {diskSpace && (
+        <div className="form-grid" style={{ marginTop: '0.75rem' }}>
+          <div className="field">
+            <span style={{ fontSize: '0.88rem', color: 'var(--muted)', display: 'block', marginBottom: '0.25rem' }}>
+              Current free space
+            </span>
+            <strong>{fmtBytes(diskSpace.freeBytes)}</strong>
+          </div>
+          <div className="field">
+            <span style={{ fontSize: '0.88rem', color: 'var(--muted)', display: 'block', marginBottom: '0.25rem' }}>
+              Threshold
+            </span>
+            <strong>{fmtBytes(diskSpace.thresholdBytes)}</strong>
+          </div>
+          <div className="field">
+            <span style={{ fontSize: '0.88rem', color: 'var(--muted)', display: 'block', marginBottom: '0.25rem' }}>
+              Status
+            </span>
+            <span className={`pill ${diskSpace.isPaused ? 'amber' : 'green'}`}>
+              {diskSpace.isPaused
+                ? `Paused (${diskSpace.pausedCount} torrent${diskSpace.pausedCount !== 1 ? 's' : ''})`
+                : 'OK'}
+            </span>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function emptyArrEndpoint(): ArrEndpoint {
+  return {
+    name: '',
+    kind: 'sonarr',
+    baseURL: '',
+    apiKey: '',
+  }
+}
+
+function ArrIntegrationSection({
+  arrReSearchAfterHours,
+  arrEndpoints,
+  onReSearchHoursChange,
+  onEndpointsChange,
+}: {
+  arrReSearchAfterHours: number
+  arrEndpoints: ArrEndpoint[]
+  onReSearchHoursChange: (value: number) => void
+  onEndpointsChange: (endpoints: ArrEndpoint[]) => void
+}) {
+  const [notifications, setNotifications] = useState<ArrNotification[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function poll() {
+      try {
+        const data = await api.arrNotifications()
+        if (!cancelled) setNotifications(data)
+      } catch {
+        // best-effort
+      }
+    }
+
+    void poll()
+    const interval = window.setInterval(poll, 10_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [])
+
+  function updateEndpoint(index: number, updates: Partial<ArrEndpoint>) {
+    const next = arrEndpoints.map((ep, i) => (i === index ? { ...ep, ...updates } : ep))
+    onEndpointsChange(next)
+  }
+
+  function addEndpoint() {
+    onEndpointsChange([...arrEndpoints, emptyArrEndpoint()])
+  }
+
+  function removeEndpoint(index: number) {
+    onEndpointsChange(arrEndpoints.filter((_, i) => i !== index))
+  }
+
+  return (
+    <section className="form-panel">
+      <div className="form-panel-header">
+        <h3>*arr Integration</h3>
+        <p>Automatically re-search failed grabs in Sonarr/Radarr after a configurable delay.</p>
+      </div>
+
+      <div className="form-grid">
+        <label className="field">
+          <span>Re-search after (hours)</span>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={arrReSearchAfterHours}
+            onChange={(e) =>
+              onReSearchHoursChange(readNumber(e.currentTarget.valueAsNumber, arrReSearchAfterHours))
+            }
+          />
+        </label>
+      </div>
+
+      {arrEndpoints.length === 0 ? (
+        <EmptyState
+          title="No *arr endpoints"
+          body="Add a Sonarr or Radarr endpoint to enable automatic re-search on failed grabs."
+        />
+      ) : (
+        <div className="section-stack">
+          {arrEndpoints.map((ep, idx) => (
+            <div
+              key={idx}
+              className="form-panel"
+              style={{ background: 'rgba(8, 20, 27, 0.55)' }}
+            >
+              <div className="form-grid">
+                <label className="field">
+                  <span>Name</span>
+                  <input
+                    value={ep.name}
+                    onChange={(e) => updateEndpoint(idx, { name: e.target.value })}
+                    placeholder="e.g. Sonarr"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Type</span>
+                  <select
+                    value={ep.kind}
+                    onChange={(e) => updateEndpoint(idx, { kind: e.target.value as 'sonarr' | 'radarr' })}
+                  >
+                    <option value="sonarr">Sonarr</option>
+                    <option value="radarr">Radarr</option>
+                  </select>
+                </label>
+
+                <label className="field wide">
+                  <span>Base URL</span>
+                  <input
+                    value={ep.baseURL}
+                    onChange={(e) => updateEndpoint(idx, { baseURL: e.target.value })}
+                    placeholder="http://localhost:8989"
+                  />
+                </label>
+
+                <label className="field wide">
+                  <span>API Key</span>
+                  <input
+                    type="password"
+                    value={ep.apiKey ?? ''}
+                    onChange={(e) => updateEndpoint(idx, { apiKey: e.target.value })}
+                    placeholder="Leave blank to keep existing key"
+                  />
+                </label>
+              </div>
+
+              <div className="button-row">
+                <button type="button" className="danger" onClick={() => removeEndpoint(idx)}>
+                  Remove endpoint
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="button-row">
+        <button type="button" onClick={addEndpoint}>
+          Add endpoint
+        </button>
+      </div>
+
+      {notifications.length > 0 && (
+        <>
+          <div className="form-panel-header" style={{ marginTop: '1rem' }}>
+            <h3>Recent re-search activity</h3>
+            <p>Latest notifications from *arr re-search attempts.</p>
+          </div>
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Torrent</th>
+                  <th>Endpoint</th>
+                  <th>Result</th>
+                  <th>Message</th>
+                  <th>When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {notifications.map((n, idx) => (
+                  <tr key={`${n.infoHash}-${n.timestamp}-${idx}`}>
+                    <td className="primary-cell">{n.name}</td>
+                    <td>{n.endpoint}</td>
+                    <td>
+                      <span className={`pill ${n.success ? 'green' : 'red'}`}>
+                        {n.success ? 'Success' : 'Failed'}
+                      </span>
+                    </td>
+                    <td>{n.message || '—'}</td>
+                    <td title={fmtDateTime(n.timestamp)}>{fmtRelativeTime(n.timestamp)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </section>
+  )
 }
 
 function BandwidthScheduleSection({
@@ -1917,6 +2230,10 @@ function normalizeSettings(settings: Settings): Settings {
     globalMaxRatio: settings.globalMaxRatio ?? null,
     globalMaxSeedingTimeMinutes: settings.globalMaxSeedingTimeMinutes ?? null,
     bandwidthSchedule: settings.bandwidthSchedule ?? [],
+    diskSpaceMinimumGB: settings.diskSpaceMinimumGB ?? null,
+    diskSpaceMonitorPath: settings.diskSpaceMonitorPath ?? '',
+    arrReSearchAfterHours: settings.arrReSearchAfterHours ?? 6,
+    arrEndpoints: settings.arrEndpoints ?? [],
   }
 }
 

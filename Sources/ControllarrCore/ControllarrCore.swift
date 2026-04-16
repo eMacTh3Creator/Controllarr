@@ -4,7 +4,8 @@
 //
 //  Wires every service actor — engine, persistence, port watcher, HTTP
 //  server, logger, post-processor, seeding policy, health monitor,
-//  bandwidth scheduler — into one boot/shutdown surface. The SwiftUI app
+//  bandwidth scheduler, disk space monitor, *arr notifier — into one
+//  boot/shutdown surface. The SwiftUI app
 //  target uses this as its entry point: pass in the WebUI resource
 //  directory, call start(), and you have a running Controllarr.
 //
@@ -27,6 +28,8 @@ public actor ControllarrRuntime {
     public nonisolated let seedingPolicy: SeedingPolicy
     public nonisolated let healthMonitor: HealthMonitor
     public nonisolated let bandwidthScheduler: BandwidthScheduler
+    public nonisolated let diskSpaceMonitor: DiskSpaceMonitor
+    public nonisolated let arrNotifier: ArrNotifier
 
     private var tickTask: Task<Void, Never>?
 
@@ -36,6 +39,7 @@ public actor ControllarrRuntime {
 
         let store = PersistenceStore()
         self.store = store
+        await store.flushMigrationIfNeeded()
 
         let snapshot = await store.snapshot()
         let savePathURL = URL(fileURLWithPath: snapshot.settings.defaultSavePath)
@@ -76,6 +80,12 @@ public actor ControllarrRuntime {
         let bandwidthScheduler = BandwidthScheduler(engine: engine, store: store, logger: logger)
         self.bandwidthScheduler = bandwidthScheduler
 
+        let diskSpaceMonitor = DiskSpaceMonitor(engine: engine, store: store, logger: logger)
+        self.diskSpaceMonitor = diskSpaceMonitor
+
+        let arrNotifier = ArrNotifier(engine: engine, store: store, healthMonitor: healthMonitor, logger: logger)
+        self.arrNotifier = arrNotifier
+
         let httpConfig = HTTPServer.Configuration(
             host: snapshot.settings.webUIHost,
             port: snapshot.settings.webUIPort,
@@ -88,6 +98,8 @@ public actor ControllarrRuntime {
             postProcessor: postProcessor,
             seedingPolicy: seedingPolicy,
             healthMonitor: healthMonitor,
+            diskSpaceMonitor: diskSpaceMonitor,
+            arrNotifier: arrNotifier,
             forceCyclePort: { [weak portWatcher] in
                 await portWatcher?.forceCycle(reason: "manual via /api/controllarr/port/cycle")
             }
@@ -98,6 +110,7 @@ public actor ControllarrRuntime {
     public func start() async throws {
         await portWatcher.start()
         await bandwidthScheduler.start()
+        await diskSpaceMonitor.start()
         try await httpServer.start()
         startTickLoop()
         logger.info("runtime", "Controllarr runtime started")
@@ -109,6 +122,7 @@ public actor ControllarrRuntime {
         tickTask = nil
         await portWatcher.stop()
         await bandwidthScheduler.stop()
+        await diskSpaceMonitor.stop()
         await httpServer.stop()
         let categories = await engine.snapshotCategories()
         await store.setCategoryMap(categories)
@@ -126,6 +140,7 @@ public actor ControllarrRuntime {
         let postProcessor = self.postProcessor
         let seedingPolicy = self.seedingPolicy
         let healthMonitor = self.healthMonitor
+        let arrNotifier = self.arrNotifier
         tickTask = Task.detached(priority: .utility) {
             while !Task.isCancelled {
                 await engine.applyPendingFileFilters()
@@ -133,6 +148,7 @@ public actor ControllarrRuntime {
                 await postProcessor.tick(torrents: torrents)
                 await seedingPolicy.tick(torrents: torrents)
                 await healthMonitor.tick(torrents: torrents)
+                await arrNotifier.tick()
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }

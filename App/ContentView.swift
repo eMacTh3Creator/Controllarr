@@ -125,6 +125,15 @@ private struct SessionStatusBar: View {
             Text("↑ \(formatRate(vm.session.uploadRate))")
                 .font(.callout.monospacedDigit())
                 .foregroundStyle(.green)
+            if let ds = vm.diskSpaceStatus, ds.isPaused {
+                HStack(spacing: 4) {
+                    Image(systemName: "externaldrive.badge.exclamationmark")
+                        .font(.caption)
+                    Text("Low disk")
+                        .font(.caption)
+                }
+                .foregroundStyle(.orange)
+            }
         }
     }
 }
@@ -660,6 +669,49 @@ struct SettingsView: View {
                     Text("Stall threshold: \(binding.wrappedValue.healthStallMinutes) min")
                 }
                 Toggle("Reannounce automatically on stall", isOn: binding.healthReannounceOnStall)
+            }
+            Section("Disk space monitor") {
+                optionalIntRow(title: "Minimum free space (GB)", binding: binding.diskSpaceMinimumGB, defaultValue: 10)
+                TextField("Monitor path (empty = default save path)", text: binding.diskSpaceMonitorPath)
+                if let status = vm.diskSpaceStatus {
+                    HStack {
+                        let freeGB = String(format: "%.1f", Double(status.freeBytes) / 1_073_741_824)
+                        Text("Free: \(freeGB) GB")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if status.isPaused {
+                            Text("⚠️ Downloads paused (\(status.pausedHashes.count) torrents)")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+            }
+            Section("*arr re-search integration") {
+                Stepper(value: binding.arrReSearchAfterHours, in: 1...168) {
+                    Text("Re-search after stall: \(binding.wrappedValue.arrReSearchAfterHours) hours")
+                }
+                if binding.wrappedValue.arrEndpoints.isEmpty {
+                    Text("No *arr endpoints configured. Use the WebUI to add Sonarr/Radarr endpoints.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(binding.wrappedValue.arrEndpoints) { ep in
+                        HStack {
+                            Image(systemName: ep.kind == .sonarr ? "tv" : "film")
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading) {
+                                Text(ep.name).font(.callout)
+                                Text(ep.baseURL).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(ep.kind.rawValue.capitalized)
+                                .font(.caption)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
+                        }
+                    }
+                }
             }
             Section {
                 HStack {

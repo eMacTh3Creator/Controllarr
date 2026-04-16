@@ -56,6 +56,29 @@ export type BandwidthScheduleRule = {
   maxUploadKBps: number
 }
 
+export type ArrEndpoint = {
+  name: string
+  kind: 'sonarr' | 'radarr'
+  baseURL: string
+  apiKey?: string
+}
+
+export type DiskSpaceStatus = {
+  freeBytes: number
+  thresholdBytes: number
+  isPaused: boolean
+  pausedCount: number
+}
+
+export type ArrNotification = {
+  infoHash: string
+  name: string
+  endpoint: string
+  success: boolean
+  message: string
+  timestamp: number
+}
+
 export type Settings = {
   listenPortRangeStart: number
   listenPortRangeEnd: number
@@ -72,6 +95,10 @@ export type Settings = {
   healthStallMinutes: number
   healthReannounceOnStall: boolean
   bandwidthSchedule: BandwidthScheduleRule[]
+  diskSpaceMinimumGB: number | null
+  diskSpaceMonitorPath: string
+  arrReSearchAfterHours: number
+  arrEndpoints: ArrEndpoint[]
 }
 
 export type HealthReason =
@@ -249,6 +276,10 @@ export const api = {
       healthStallMinutes: response.healthStallMinutes ?? 30,
       healthReannounceOnStall: response.healthReannounceOnStall ?? true,
       bandwidthSchedule: response.bandwidthSchedule ?? [],
+      diskSpaceMinimumGB: response.diskSpaceMinimumGB ?? null,
+      diskSpaceMonitorPath: response.diskSpaceMonitorPath ?? '',
+      arrReSearchAfterHours: response.arrReSearchAfterHours ?? 6,
+      arrEndpoints: response.arrEndpoints ?? [],
     }
   },
 
@@ -259,6 +290,10 @@ export const api = {
       globalMaxRatio: settings.globalMaxRatio,
       globalMaxSeedingTimeMinutes: settings.globalMaxSeedingTimeMinutes,
       bandwidthSchedule: settings.bandwidthSchedule,
+      diskSpaceMinimumGB: settings.diskSpaceMinimumGB,
+      diskSpaceMonitorPath: settings.diskSpaceMonitorPath,
+      arrReSearchAfterHours: settings.arrReSearchAfterHours,
+      arrEndpoints: settings.arrEndpoints,
     })
   },
 
@@ -280,5 +315,13 @@ export const api = {
 
   async log(limit = 500): Promise<LogEntry[]> {
     return json<LogEntry[]>(`/api/controllarr/log?limit=${limit}`)
+  },
+
+  async diskSpace(): Promise<DiskSpaceStatus> {
+    return json<DiskSpaceStatus>('/api/controllarr/diskspace')
+  },
+
+  async arrNotifications(): Promise<ArrNotification[]> {
+    return json<ArrNotification[]>('/api/controllarr/arr')
   },
 }

@@ -38,7 +38,8 @@ public enum QBittorrentAPI {
             let username = form["username"] ?? ""
             let password = form["password"] ?? ""
             let settings = await services.store.settings()
-            if username == settings.webUIUsername && password == settings.webUIPassword {
+            let resolvedPassword = await services.store.resolvedWebUIPassword()
+            if username == settings.webUIUsername && password == resolvedPassword {
                 let sid = await sessions.issue()
                 var headers = HTTPFields()
                 headers[.setCookie] = "SID=\(sid); Path=/; HttpOnly"
@@ -88,10 +89,12 @@ public enum QBittorrentAPI {
                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 return Response(status: .badRequest)
             }
+            if let pwd = dict["web_ui_password"] as? String, !pwd.isEmpty {
+                await services.store.setWebUIPassword(pwd)
+            }
             await services.store.updateSettings { s in
                 if let save = dict["save_path"] as? String { s.defaultSavePath = save }
                 if let user = dict["web_ui_username"] as? String { s.webUIUsername = user }
-                if let pwd  = dict["web_ui_password"] as? String, !pwd.isEmpty { s.webUIPassword = pwd }
                 if let port = dict["listen_port"] as? Int {
                     Task { await services.engine.setListenPort(UInt16(port)) }
                 }
@@ -501,6 +504,19 @@ public enum QBittorrentAPI {
                     as? [String: Any] else {
                 return Response(status: .badRequest)
             }
+            // Handle password separately via Keychain
+            if let v = dict["webUIPassword"] as? String, !v.isEmpty {
+                await services.store.setWebUIPassword(v)
+            }
+            // Handle *arr API keys via Keychain
+            if let endpoints = dict["arrEndpoints"] as? [[String: Any]] {
+                for ep in endpoints {
+                    if let name = ep["name"] as? String,
+                       let key = ep["apiKey"] as? String, !key.isEmpty {
+                        await services.store.setArrAPIKey(key, forEndpoint: name)
+                    }
+                }
+            }
             await services.store.updateSettings { s in
                 if let v = dict["listenPortRangeStart"] as? Int { s.listenPortRangeStart = UInt16(v) }
                 if let v = dict["listenPortRangeEnd"]   as? Int { s.listenPortRangeEnd   = UInt16(v) }
@@ -509,7 +525,6 @@ public enum QBittorrentAPI {
                 if let v = dict["webUIHost"]         as? String { s.webUIHost = v }
                 if let v = dict["webUIPort"]         as? Int    { s.webUIPort = v }
                 if let v = dict["webUIUsername"]     as? String { s.webUIUsername = v }
-                if let v = dict["webUIPassword"]     as? String, !v.isEmpty { s.webUIPassword = v }
                 if dict.keys.contains("globalMaxRatio") {
                     s.globalMaxRatio = dict["globalMaxRatio"] as? Double
                 }
@@ -523,6 +538,41 @@ public enum QBittorrentAPI {
                 if let v = dict["minimumSeedTimeMinutes"] as? Int { s.minimumSeedTimeMinutes = v }
                 if let v = dict["healthStallMinutes"]     as? Int { s.healthStallMinutes = v }
                 if let v = dict["healthReannounceOnStall"] as? Bool { s.healthReannounceOnStall = v }
+                // Bandwidth schedule
+                if let rules = dict["bandwidthSchedule"] as? [[String: Any]] {
+                    s.bandwidthSchedule = rules.compactMap { r in
+                        guard let name = r["name"] as? String else { return nil }
+                        return BandwidthRule(
+                            name: name,
+                            enabled: (r["enabled"] as? Bool) ?? true,
+                            daysOfWeek: (r["daysOfWeek"] as? [Int]) ?? [2,3,4,5,6],
+                            startHour: (r["startHour"] as? Int) ?? 0,
+                            startMinute: (r["startMinute"] as? Int) ?? 0,
+                            endHour: (r["endHour"] as? Int) ?? 0,
+                            endMinute: (r["endMinute"] as? Int) ?? 0,
+                            maxDownloadKBps: r["maxDownloadKBps"] as? Int,
+                            maxUploadKBps: r["maxUploadKBps"] as? Int
+                        )
+                    }
+                }
+                if dict.keys.contains("diskSpaceMinimumGB") {
+                    s.diskSpaceMinimumGB = dict["diskSpaceMinimumGB"] as? Int
+                }
+                if let v = dict["diskSpaceMonitorPath"] as? String { s.diskSpaceMonitorPath = v }
+                if let v = dict["arrReSearchAfterHours"] as? Int { s.arrReSearchAfterHours = v }
+                // Update arr endpoint metadata (not keys — handled above)
+                if let endpoints = dict["arrEndpoints"] as? [[String: Any]] {
+                    s.arrEndpoints = endpoints.compactMap { ep in
+                        guard let name = ep["name"] as? String,
+                              let kindStr = ep["kind"] as? String,
+                              let kind = ArrEndpoint.Kind(rawValue: kindStr),
+                              let url = ep["baseURL"] as? String else { return nil }
+                        return ArrEndpoint(
+                            name: name, kind: kind, baseURL: url,
+                            apiKeyInKeychain: true, apiKey: ""
+                        )
+                    }
+                }
             }
             return plainText("")
         }
@@ -585,6 +635,35 @@ public enum QBittorrentAPI {
             return json(out)
         }
 
+        // MARK: Controllarr: disk space
+
+        router.get("/api/controllarr/diskspace") { _, _ -> Response in
+            let status = await services.diskSpaceMonitor.snapshot()
+            return json([
+                "freeBytes": status.freeBytes,
+                "thresholdBytes": status.thresholdBytes,
+                "isPaused": status.isPaused,
+                "pausedCount": status.pausedHashes.count,
+            ] as [String: Any])
+        }
+
+        // MARK: Controllarr: *arr notifier
+
+        router.get("/api/controllarr/arr") { _, _ -> Response in
+            let entries = await services.arrNotifier.snapshot()
+            let out: [[String: Any]] = entries.map { n in
+                [
+                    "infoHash": n.infoHash,
+                    "name": n.name,
+                    "endpoint": n.endpoint,
+                    "success": n.success,
+                    "message": n.message,
+                    "timestamp": n.timestamp.timeIntervalSince1970,
+                ]
+            }
+            return json(out)
+        }
+
         // MARK: Controllarr: log viewer
 
         router.get("/api/controllarr/log") { request, _ -> Response in
@@ -632,9 +711,33 @@ public enum QBittorrentAPI {
             "minimumSeedTimeMinutes": s.minimumSeedTimeMinutes,
             "healthStallMinutes": s.healthStallMinutes,
             "healthReannounceOnStall": s.healthReannounceOnStall,
+            "diskSpaceMonitorPath": s.diskSpaceMonitorPath,
+            "arrReSearchAfterHours": s.arrReSearchAfterHours,
+            "bandwidthSchedule": s.bandwidthSchedule.map { rule -> [String: Any] in
+                var d: [String: Any] = [
+                    "name": rule.name,
+                    "enabled": rule.enabled,
+                    "daysOfWeek": rule.daysOfWeek,
+                    "startHour": rule.startHour,
+                    "startMinute": rule.startMinute,
+                    "endHour": rule.endHour,
+                    "endMinute": rule.endMinute,
+                ]
+                if let v = rule.maxDownloadKBps { d["maxDownloadKBps"] = v }
+                if let v = rule.maxUploadKBps { d["maxUploadKBps"] = v }
+                return d
+            },
+            "arrEndpoints": s.arrEndpoints.map { ep -> [String: Any] in
+                [
+                    "name": ep.name,
+                    "kind": ep.kind.rawValue,
+                    "baseURL": ep.baseURL,
+                ]
+            },
         ]
         if let v = s.globalMaxRatio { dict["globalMaxRatio"] = v }
         if let v = s.globalMaxSeedingTimeMinutes { dict["globalMaxSeedingTimeMinutes"] = v }
+        if let v = s.diskSpaceMinimumGB { dict["diskSpaceMinimumGB"] = v }
         return dict
     }
 

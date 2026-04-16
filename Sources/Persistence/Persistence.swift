@@ -126,6 +126,37 @@ public struct BandwidthRule: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+public struct ArrEndpoint: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { name }
+    public var name: String
+    public enum Kind: String, Codable, Sendable, CaseIterable {
+        case sonarr
+        case radarr
+    }
+    public var kind: Kind
+    public var baseURL: String
+    /// When true, the API key lives in Keychain under "arr_<name>".
+    /// The `apiKey` field below is only used for initial setup / migration.
+    public var apiKeyInKeychain: Bool
+    /// Plaintext API key — only used during initial setup. Once migrated
+    /// to Keychain this is cleared to empty.
+    public var apiKey: String
+
+    public init(
+        name: String,
+        kind: Kind,
+        baseURL: String,
+        apiKeyInKeychain: Bool = false,
+        apiKey: String = ""
+    ) {
+        self.name = name
+        self.kind = kind
+        self.baseURL = baseURL
+        self.apiKeyInKeychain = apiKeyInKeychain
+        self.apiKey = apiKey
+    }
+}
+
 public struct Settings: Codable, Sendable, Equatable {
     /// Inclusive range of ports the PortWatcher may pick from when
     /// reselecting. Inclusive on both ends.
@@ -170,6 +201,23 @@ public struct Settings: Codable, Sendable, Equatable {
     /// Time-of-day bandwidth limit windows. First matching window wins.
     public var bandwidthSchedule: [BandwidthRule]
 
+    // Disk space monitor --------------------------------------------------------
+
+    /// Minimum free disk space in GB before auto-pausing downloads.
+    /// nil or 0 = disabled.
+    public var diskSpaceMinimumGB: Int?
+    /// Path to monitor for free space. Defaults to `defaultSavePath`.
+    /// If empty, uses `defaultSavePath`.
+    public var diskSpaceMonitorPath: String
+
+    // *arr integration ----------------------------------------------------------
+
+    /// Connected Sonarr / Radarr endpoints for proactive re-search.
+    public var arrEndpoints: [ArrEndpoint]
+    /// Hours a torrent must be stalled before the *arr notifier triggers
+    /// a re-search. Avoids false positives on slow starts.
+    public var arrReSearchAfterHours: Int
+
     public static func defaults(homeDir: URL) -> Settings {
         Settings(
             listenPortRangeStart: 49152,
@@ -188,7 +236,11 @@ public struct Settings: Codable, Sendable, Equatable {
             minimumSeedTimeMinutes: 60,
             healthStallMinutes: 30,
             healthReannounceOnStall: true,
-            bandwidthSchedule: []
+            bandwidthSchedule: [],
+            diskSpaceMinimumGB: nil,
+            diskSpaceMonitorPath: "",
+            arrEndpoints: [],
+            arrReSearchAfterHours: 6
         )
     }
 
@@ -209,6 +261,10 @@ public struct Settings: Codable, Sendable, Equatable {
         self.healthStallMinutes = try c.decodeIfPresent(Int.self, forKey: .healthStallMinutes) ?? 30
         self.healthReannounceOnStall = try c.decodeIfPresent(Bool.self, forKey: .healthReannounceOnStall) ?? true
         self.bandwidthSchedule = try c.decodeIfPresent([BandwidthRule].self, forKey: .bandwidthSchedule) ?? []
+        self.diskSpaceMinimumGB = try c.decodeIfPresent(Int.self, forKey: .diskSpaceMinimumGB)
+        self.diskSpaceMonitorPath = try c.decodeIfPresent(String.self, forKey: .diskSpaceMonitorPath) ?? ""
+        self.arrEndpoints = try c.decodeIfPresent([ArrEndpoint].self, forKey: .arrEndpoints) ?? []
+        self.arrReSearchAfterHours = try c.decodeIfPresent(Int.self, forKey: .arrReSearchAfterHours) ?? 6
     }
 
     public init(
@@ -226,7 +282,11 @@ public struct Settings: Codable, Sendable, Equatable {
         minimumSeedTimeMinutes: Int,
         healthStallMinutes: Int,
         healthReannounceOnStall: Bool,
-        bandwidthSchedule: [BandwidthRule] = []
+        bandwidthSchedule: [BandwidthRule] = [],
+        diskSpaceMinimumGB: Int? = nil,
+        diskSpaceMonitorPath: String = "",
+        arrEndpoints: [ArrEndpoint] = [],
+        arrReSearchAfterHours: Int = 6
     ) {
         self.listenPortRangeStart = listenPortRangeStart
         self.listenPortRangeEnd = listenPortRangeEnd
@@ -243,6 +303,10 @@ public struct Settings: Codable, Sendable, Equatable {
         self.healthStallMinutes = healthStallMinutes
         self.healthReannounceOnStall = healthReannounceOnStall
         self.bandwidthSchedule = bandwidthSchedule
+        self.diskSpaceMinimumGB = diskSpaceMinimumGB
+        self.diskSpaceMonitorPath = diskSpaceMonitorPath
+        self.arrEndpoints = arrEndpoints
+        self.arrReSearchAfterHours = arrReSearchAfterHours
     }
 }
 
@@ -305,6 +369,76 @@ public actor PersistenceStore {
         }
 
         try? FileManager.default.createDirectory(at: resumeDir, withIntermediateDirectories: true)
+
+        // One-time migration: move plaintext password into Keychain.
+        // Inlined here because actor init is nonisolated in Swift 6 and
+        // we can only access stored properties directly (no actor-isolated
+        // method calls).
+        let pwd = state.settings.webUIPassword
+        if !pwd.isEmpty && pwd != "__keychain__" {
+            Keychain.set(pwd, forKey: Keychain.webUIPasswordKey)
+            state.settings.webUIPassword = "__keychain__"
+            _needsFlush = true
+        }
+        for i in state.settings.arrEndpoints.indices {
+            let ep = state.settings.arrEndpoints[i]
+            if !ep.apiKey.isEmpty && !ep.apiKeyInKeychain {
+                Keychain.set(ep.apiKey, forKey: "arr_\(ep.name)")
+                state.settings.arrEndpoints[i].apiKey = ""
+                state.settings.arrEndpoints[i].apiKeyInKeychain = true
+                _needsFlush = true
+            }
+        }
+        // Deferred flush — actor isn't fully initialized yet so
+        // scheduleFlush() can't be called; the first mutation after
+        // init (or flushNow on shutdown) will persist the migrated state.
+    }
+
+    /// Flag set during init when migration happened. The first call to
+    /// any write method will trigger the actual disk write.
+    private var _needsFlush: Bool = false
+
+    /// Call once after init from an async context to flush any migration
+    /// changes that happened during init.
+    public func flushMigrationIfNeeded() {
+        if _needsFlush {
+            _needsFlush = false
+            scheduleFlush()
+        }
+    }
+
+    // MARK: Credential helpers
+
+    /// Returns the actual WebUI password (from Keychain if migrated,
+    /// fallback to the JSON field for pre-migration state files).
+    public func resolvedWebUIPassword() -> String {
+        if state.settings.webUIPassword == "__keychain__" {
+            return Keychain.get(forKey: Keychain.webUIPasswordKey) ?? ""
+        }
+        return state.settings.webUIPassword
+    }
+
+    /// Store a new WebUI password in Keychain and mark the JSON sentinel.
+    public func setWebUIPassword(_ password: String) {
+        Keychain.set(password, forKey: Keychain.webUIPasswordKey)
+        state.settings.webUIPassword = "__keychain__"
+        scheduleFlush()
+    }
+
+    /// Retrieve the API key for a named *arr endpoint from Keychain.
+    public func arrAPIKey(forEndpoint name: String) -> String {
+        Keychain.get(forKey: "arr_\(name)") ?? ""
+    }
+
+    /// Store an API key for a named *arr endpoint in Keychain.
+    public func setArrAPIKey(_ key: String, forEndpoint name: String) {
+        Keychain.set(key, forKey: "arr_\(name)")
+        // Mark the endpoint as migrated.
+        if let i = state.settings.arrEndpoints.firstIndex(where: { $0.name == name }) {
+            state.settings.arrEndpoints[i].apiKeyInKeychain = true
+            state.settings.arrEndpoints[i].apiKey = ""
+            scheduleFlush()
+        }
     }
 
     // MARK: Read

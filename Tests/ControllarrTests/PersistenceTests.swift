@@ -27,6 +27,10 @@ import Foundation
     #expect(s.globalMaxRatio == nil)
     #expect(s.globalMaxSeedingTimeMinutes == nil)
     #expect(s.bandwidthSchedule.isEmpty)
+    #expect(s.diskSpaceMinimumGB == nil)
+    #expect(s.diskSpaceMonitorPath.isEmpty)
+    #expect(s.arrEndpoints.isEmpty)
+    #expect(s.arrReSearchAfterHours == 6)
 }
 
 @Test func testV1SettingsDecoding() throws {
@@ -60,6 +64,10 @@ import Foundation
     #expect(s.globalMaxRatio == nil)
     #expect(s.globalMaxSeedingTimeMinutes == nil)
     #expect(s.bandwidthSchedule.isEmpty)
+    #expect(s.diskSpaceMinimumGB == nil)
+    #expect(s.diskSpaceMonitorPath.isEmpty)
+    #expect(s.arrEndpoints.isEmpty)
+    #expect(s.arrReSearchAfterHours == 6)
 }
 
 @Test func testSettingsRoundTrip() throws {
