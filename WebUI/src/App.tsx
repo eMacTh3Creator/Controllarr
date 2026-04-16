@@ -18,6 +18,7 @@ import {
   type SessionStats,
   type Settings,
   type Torrent,
+  type VPNStatus,
 } from './api'
 import {
   fmtBytes,
@@ -126,6 +127,7 @@ export function App() {
   const [hasLoaded, setHasLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<number | null>(null)
+  const [vpnStatus, setVpnStatus] = useState<VPNStatus | null>(null)
 
   const deferredLogFilter = useDeferredValue(logFilter)
   const currentTab = TABS.find((tab) => tab.id === activeTab) ?? TABS[0]
@@ -225,6 +227,23 @@ export function App() {
 
     return () => window.clearInterval(intervalId)
   }, [authed, refreshAll, refreshLive])
+
+  // VPN status polling (5s when VPN is enabled in settings)
+  useEffect(() => {
+    if (!authed) return
+    const vpnEnabled = serverSettings?.vpnEnabled
+    if (!vpnEnabled) { setVpnStatus(null); return }
+    let cancelled = false
+    async function poll() {
+      try {
+        const s = await api.vpnStatus()
+        if (!cancelled) setVpnStatus(s)
+      } catch { /* ignore */ }
+    }
+    void poll()
+    const id = window.setInterval(poll, 5_000)
+    return () => { cancelled = true; window.clearInterval(id) }
+  }, [authed, serverSettings?.vpnEnabled])
 
   useEffect(() => {
     if (!settingsMessage) return
@@ -411,6 +430,14 @@ export function App() {
               <span>Incoming</span>
               <strong>{snapshot.stats?.hasIncoming ? 'Healthy' : 'Waiting'}</strong>
             </div>
+            {vpnStatus && (
+              <div className="mini-stat">
+                <span>VPN</span>
+                <strong style={{ color: vpnStatus.isConnected ? 'var(--green, #22c55e)' : 'var(--red, #ef4444)' }}>
+                  {vpnStatus.isConnected ? vpnStatus.interfaceName : 'Down'}
+                </strong>
+              </div>
+            )}
             <button type="button" onClick={() => void refreshAll(false, false)} disabled={isLoading}>
               {isLoading ? 'Refreshing…' : 'Refresh now'}
             </button>
@@ -1298,6 +1325,15 @@ function SettingsTab({
         </section>
       </div>
 
+      <VPNProtectionSection
+        vpnEnabled={settings.vpnEnabled}
+        vpnKillSwitch={settings.vpnKillSwitch}
+        vpnBindInterface={settings.vpnBindInterface}
+        vpnInterfacePrefix={settings.vpnInterfacePrefix}
+        vpnMonitorIntervalSeconds={settings.vpnMonitorIntervalSeconds}
+        onChange={(vpnFields) => patch(vpnFields)}
+      />
+
       <DiskSpaceMonitorSection
         diskSpaceMinimumGB={settings.diskSpaceMinimumGB}
         diskSpaceMonitorPath={settings.diskSpaceMonitorPath}
@@ -1345,6 +1381,127 @@ function emptyScheduleRule(): BandwidthScheduleRule {
     maxDownloadKBps: 0,
     maxUploadKBps: 0,
   }
+}
+
+function VPNProtectionSection({
+  vpnEnabled,
+  vpnKillSwitch,
+  vpnBindInterface,
+  vpnInterfacePrefix,
+  vpnMonitorIntervalSeconds,
+  onChange,
+}: {
+  vpnEnabled: boolean
+  vpnKillSwitch: boolean
+  vpnBindInterface: boolean
+  vpnInterfacePrefix: string
+  vpnMonitorIntervalSeconds: number
+  onChange: (fields: Partial<Settings>) => void
+}) {
+  const [vpnStatus, setVpnStatus] = useState<VPNStatus | null>(null)
+
+  useEffect(() => {
+    if (!vpnEnabled) { setVpnStatus(null); return }
+    let cancelled = false
+
+    async function poll() {
+      try {
+        const status = await api.vpnStatus()
+        if (!cancelled) setVpnStatus(status)
+      } catch { /* ignore */ }
+    }
+
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [vpnEnabled])
+
+  return (
+    <div className="settings-panel">
+      <h3>VPN protection</h3>
+      <section>
+        <label>
+          <span>Enable VPN monitoring</span>
+          <input
+            type="checkbox"
+            checked={vpnEnabled}
+            onChange={(e) => onChange({ vpnEnabled: e.currentTarget.checked })}
+          />
+        </label>
+        {vpnEnabled && (
+          <>
+            <label>
+              <span>Kill switch (pause all when VPN drops)</span>
+              <input
+                type="checkbox"
+                checked={vpnKillSwitch}
+                onChange={(e) => onChange({ vpnKillSwitch: e.currentTarget.checked })}
+              />
+            </label>
+            <label>
+              <span>Bind to VPN interface (prevent leaks)</span>
+              <input
+                type="checkbox"
+                checked={vpnBindInterface}
+                onChange={(e) => onChange({ vpnBindInterface: e.currentTarget.checked })}
+              />
+            </label>
+            <label>
+              <span>Interface prefix</span>
+              <input
+                type="text"
+                value={vpnInterfacePrefix}
+                onChange={(e) => onChange({ vpnInterfacePrefix: e.currentTarget.value })}
+                placeholder="utun"
+                style={{ width: 100 }}
+              />
+            </label>
+            <label>
+              <span>Check interval (seconds)</span>
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={vpnMonitorIntervalSeconds}
+                onChange={(e) =>
+                  onChange({ vpnMonitorIntervalSeconds: Math.max(1, parseInt(e.currentTarget.value) || 5) })
+                }
+                style={{ width: 80 }}
+              />
+            </label>
+            {vpnStatus && (
+              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span
+                  className="status-pill"
+                  style={{
+                    background: vpnStatus.isConnected ? 'var(--green, #22c55e)' : 'var(--red, #ef4444)',
+                    color: '#fff',
+                    padding: '2px 10px',
+                    borderRadius: 12,
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                >
+                  {vpnStatus.isConnected ? 'Connected' : 'Disconnected'}
+                </span>
+                {vpnStatus.isConnected && (
+                  <span style={{ fontSize: 13, color: 'var(--muted)' }}>
+                    {vpnStatus.interfaceName} ({vpnStatus.interfaceIP})
+                    {vpnStatus.boundToVPN && ' \u2014 bound'}
+                  </span>
+                )}
+                {!vpnStatus.isConnected && vpnStatus.killSwitchEngaged && (
+                  <span style={{ fontSize: 13, color: 'var(--red, #ef4444)', fontWeight: 600 }}>
+                    Kill switch active ({vpnStatus.pausedCount} paused)
+                  </span>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </section>
+    </div>
+  )
 }
 
 function DiskSpaceMonitorSection({

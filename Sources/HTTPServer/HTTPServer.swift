@@ -39,6 +39,7 @@ public actor HTTPServer {
         public let seedingPolicy: SeedingPolicy
         public let healthMonitor: HealthMonitor
         public let diskSpaceMonitor: DiskSpaceMonitor
+        public let vpnMonitor: VPNMonitor
         public let arrNotifier: ArrNotifier
         /// Closure the WebUI exposes as "cycle port now" — implemented by
         /// the PortWatcher. Kept as a closure so HTTPServer doesn't take a
@@ -52,6 +53,7 @@ public actor HTTPServer {
             seedingPolicy: SeedingPolicy,
             healthMonitor: HealthMonitor,
             diskSpaceMonitor: DiskSpaceMonitor,
+            vpnMonitor: VPNMonitor,
             arrNotifier: ArrNotifier,
             forceCyclePort: @escaping @Sendable () async -> Void
         ) {
@@ -62,6 +64,7 @@ public actor HTTPServer {
             self.seedingPolicy = seedingPolicy
             self.healthMonitor = healthMonitor
             self.diskSpaceMonitor = diskSpaceMonitor
+            self.vpnMonitor = vpnMonitor
             self.arrNotifier = arrNotifier
             self.forceCyclePort = forceCyclePort
         }

@@ -79,6 +79,15 @@ export type ArrNotification = {
   timestamp: number
 }
 
+export type VPNStatus = {
+  isConnected: boolean
+  interfaceName: string
+  interfaceIP: string
+  killSwitchEngaged: boolean
+  pausedCount: number
+  boundToVPN: boolean
+}
+
 export type Settings = {
   listenPortRangeStart: number
   listenPortRangeEnd: number
@@ -95,6 +104,11 @@ export type Settings = {
   healthStallMinutes: number
   healthReannounceOnStall: boolean
   bandwidthSchedule: BandwidthScheduleRule[]
+  vpnEnabled: boolean
+  vpnKillSwitch: boolean
+  vpnBindInterface: boolean
+  vpnInterfacePrefix: string
+  vpnMonitorIntervalSeconds: number
   diskSpaceMinimumGB: number | null
   diskSpaceMonitorPath: string
   arrReSearchAfterHours: number
@@ -288,6 +302,11 @@ export const api = {
       healthStallMinutes: response.healthStallMinutes ?? 30,
       healthReannounceOnStall: response.healthReannounceOnStall ?? true,
       bandwidthSchedule: response.bandwidthSchedule ?? [],
+      vpnEnabled: response.vpnEnabled ?? false,
+      vpnKillSwitch: response.vpnKillSwitch ?? true,
+      vpnBindInterface: response.vpnBindInterface ?? true,
+      vpnInterfacePrefix: response.vpnInterfacePrefix ?? 'utun',
+      vpnMonitorIntervalSeconds: response.vpnMonitorIntervalSeconds ?? 5,
       diskSpaceMinimumGB: response.diskSpaceMinimumGB ?? null,
       diskSpaceMonitorPath: response.diskSpaceMonitorPath ?? '',
       arrReSearchAfterHours: response.arrReSearchAfterHours ?? 6,
@@ -302,6 +321,11 @@ export const api = {
       globalMaxRatio: settings.globalMaxRatio,
       globalMaxSeedingTimeMinutes: settings.globalMaxSeedingTimeMinutes,
       bandwidthSchedule: settings.bandwidthSchedule,
+      vpnEnabled: settings.vpnEnabled,
+      vpnKillSwitch: settings.vpnKillSwitch,
+      vpnBindInterface: settings.vpnBindInterface,
+      vpnInterfacePrefix: settings.vpnInterfacePrefix,
+      vpnMonitorIntervalSeconds: settings.vpnMonitorIntervalSeconds,
       diskSpaceMinimumGB: settings.diskSpaceMinimumGB,
       diskSpaceMonitorPath: settings.diskSpaceMonitorPath,
       arrReSearchAfterHours: settings.arrReSearchAfterHours,
@@ -335,5 +359,9 @@ export const api = {
 
   async arrNotifications(): Promise<ArrNotification[]> {
     return json<ArrNotification[]>('/api/controllarr/arr')
+  },
+
+  async vpnStatus(): Promise<VPNStatus> {
+    return json<VPNStatus>('/api/controllarr/vpn')
   },
 }

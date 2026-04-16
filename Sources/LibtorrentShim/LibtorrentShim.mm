@@ -579,6 +579,20 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
     NSLog(@"[Controllarr] listen port -> %u", port);
 }
 
+- (void)setListenInterfacesString:(NSString *)interfaces {
+    lt::settings_pack pack;
+    pack.set_str(lt::settings_pack::listen_interfaces, interfaces.UTF8String);
+    _session->apply_settings(std::move(pack));
+    NSLog(@"[Controllarr] listen_interfaces -> %@", interfaces);
+}
+
+- (void)setOutgoingInterface:(NSString *)interfaceName {
+    lt::settings_pack pack;
+    pack.set_str(lt::settings_pack::outgoing_interfaces, interfaceName.UTF8String);
+    _session->apply_settings(std::move(pack));
+    NSLog(@"[Controllarr] outgoing_interfaces -> %@", interfaceName);
+}
+
 - (void)setRateLimitsDownloadKBps:(int)downKBps uploadKBps:(int)upKBps {
     lt::settings_pack pack;
     // 0 = unlimited in libtorrent

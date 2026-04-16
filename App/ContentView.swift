@@ -125,6 +125,17 @@ private struct SessionStatusBar: View {
             Text("↑ \(formatRate(vm.session.uploadRate))")
                 .font(.callout.monospacedDigit())
                 .foregroundStyle(.green)
+            if let vpn = vm.vpnStatus, vm.settings.vpnEnabled {
+                HStack(spacing: 4) {
+                    Image(systemName: vpn.isConnected ? "lock.shield.fill" : "lock.shield")
+                        .font(.caption)
+                    Text(vpn.isConnected
+                         ? "VPN \(vpn.interfaceName ?? "")"
+                         : "VPN down")
+                        .font(.caption)
+                }
+                .foregroundStyle(vpn.isConnected ? .green : .red)
+            }
             if let ds = vm.diskSpaceStatus, ds.isPaused {
                 HStack(spacing: 4) {
                     Image(systemName: "externaldrive.badge.exclamationmark")
@@ -669,6 +680,44 @@ struct SettingsView: View {
                     Text("Stall threshold: \(binding.wrappedValue.healthStallMinutes) min")
                 }
                 Toggle("Reannounce automatically on stall", isOn: binding.healthReannounceOnStall)
+            }
+            Section("VPN protection") {
+                Toggle("Enable VPN monitoring", isOn: binding.vpnEnabled)
+                if binding.wrappedValue.vpnEnabled {
+                    Toggle("Kill switch (pause all torrents when VPN drops)", isOn: binding.vpnKillSwitch)
+                    Toggle("Bind to VPN interface (prevent traffic leaks)", isOn: binding.vpnBindInterface)
+                    TextField("Interface prefix", text: binding.vpnInterfacePrefix)
+                        .help("PIA/WireGuard use \"utun\". Change only if your VPN uses a different naming scheme.")
+                    Stepper(value: binding.vpnMonitorIntervalSeconds, in: 1...60) {
+                        Text("Check interval: \(binding.wrappedValue.vpnMonitorIntervalSeconds)s")
+                    }
+                    if let vpn = vm.vpnStatus {
+                        HStack(spacing: 8) {
+                            Image(systemName: vpn.isConnected ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundStyle(vpn.isConnected ? .green : .red)
+                            if vpn.isConnected {
+                                Text("Connected: \(vpn.interfaceName ?? "?") (\(vpn.interfaceIP ?? "?"))")
+                                    .font(.caption)
+                                if vpn.boundToVPN {
+                                    Text("Bound")
+                                        .font(.caption)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(.green.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                                }
+                            } else {
+                                Text("VPN not detected")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if vpn.killSwitchEngaged {
+                                    Text("Kill switch active (\(vpn.pausedHashes.count) paused)")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
+                            }
+                        }
+                    }
+                }
             }
             Section("Disk space monitor") {
                 optionalIntRow(title: "Minimum free space (GB)", binding: binding.diskSpaceMinimumGB, defaultValue: 10)

@@ -29,6 +29,7 @@ public actor ControllarrRuntime {
     public nonisolated let healthMonitor: HealthMonitor
     public nonisolated let bandwidthScheduler: BandwidthScheduler
     public nonisolated let diskSpaceMonitor: DiskSpaceMonitor
+    public nonisolated let vpnMonitor: VPNMonitor
     public nonisolated let arrNotifier: ArrNotifier
 
     private var tickTask: Task<Void, Never>?
@@ -83,6 +84,9 @@ public actor ControllarrRuntime {
         let diskSpaceMonitor = DiskSpaceMonitor(engine: engine, store: store, logger: logger)
         self.diskSpaceMonitor = diskSpaceMonitor
 
+        let vpnMonitor = VPNMonitor(engine: engine, store: store, logger: logger)
+        self.vpnMonitor = vpnMonitor
+
         let arrNotifier = ArrNotifier(engine: engine, store: store, healthMonitor: healthMonitor, logger: logger)
         self.arrNotifier = arrNotifier
 
@@ -99,6 +103,7 @@ public actor ControllarrRuntime {
             seedingPolicy: seedingPolicy,
             healthMonitor: healthMonitor,
             diskSpaceMonitor: diskSpaceMonitor,
+            vpnMonitor: vpnMonitor,
             arrNotifier: arrNotifier,
             forceCyclePort: { [weak portWatcher] in
                 await portWatcher?.forceCycle(reason: "manual via /api/controllarr/port/cycle")
@@ -111,6 +116,7 @@ public actor ControllarrRuntime {
         await portWatcher.start()
         await bandwidthScheduler.start()
         await diskSpaceMonitor.start()
+        await vpnMonitor.start()
         try await httpServer.start()
         startTickLoop()
         logger.info("runtime", "Controllarr runtime started")
@@ -123,6 +129,7 @@ public actor ControllarrRuntime {
         await portWatcher.stop()
         await bandwidthScheduler.stop()
         await diskSpaceMonitor.stop()
+        await vpnMonitor.stop()
         await httpServer.stop()
         let categories = await engine.snapshotCategories()
         await store.setCategoryMap(categories)

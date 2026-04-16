@@ -42,6 +42,7 @@ final class RuntimeViewModel {
     var seedingLog: [SeedingPolicy.Enforcement] = []
     var logEntries: [Logger.Entry] = []
     var diskSpaceStatus: DiskSpaceMonitor.Status?
+    var vpnStatus: VPNMonitor.Status?
     var arrNotifications: [ArrNotifier.Notification] = []
 
     // MARK: - Runtime
@@ -91,6 +92,7 @@ final class RuntimeViewModel {
         let hm = runtime.healthMonitor
         let logger = runtime.logger
         let dsm = runtime.diskSpaceMonitor
+        let vpn = runtime.vpnMonitor
         let an = runtime.arrNotifier
 
         async let t = engine.pollStats()
@@ -101,6 +103,7 @@ final class RuntimeViewModel {
         async let p = pp.snapshot()
         async let sl = sp.snapshot()
         async let ds = dsm.snapshot()
+        async let vp = vpn.snapshot()
         async let ar = an.snapshot()
         let log = await logger.snapshot(limit: 200)
 
@@ -112,6 +115,7 @@ final class RuntimeViewModel {
         self.postRecords = await p
         self.seedingLog = await sl
         self.diskSpaceStatus = await ds
+        self.vpnStatus = await vp
         self.arrNotifications = await ar
         self.logEntries = log
     }

@@ -159,6 +159,17 @@ typedef NS_ENUM(NSInteger, CTRLTorrentState) {
 /// listen_interfaces setting and re-binds. Safe to call repeatedly.
 - (void)setListenPort:(uint16_t)port;
 
+/// Directly set libtorrent's `listen_interfaces` string.
+/// Use this to bind to a specific network interface, e.g.
+/// `@"10.0.0.1:6881"` to listen only on a VPN adapter.
+- (void)setListenInterfacesString:(NSString *)interfaces;
+
+/// Set the `outgoing_interfaces` setting so libtorrent sends all
+/// peer and tracker traffic through a specific network interface.
+/// Pass an interface name like `@"utun4"` or an IP like `@"10.0.0.1"`.
+/// Pass empty string to unbind (revert to OS default routing).
+- (void)setOutgoingInterface:(NSString *)interfaceName;
+
 /// Set global download/upload rate limits in KiB/s. 0 = unlimited.
 - (void)setRateLimitsDownloadKBps:(int)downKBps uploadKBps:(int)upKBps;
 

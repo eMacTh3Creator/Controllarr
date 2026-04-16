@@ -210,6 +210,23 @@ public struct Settings: Codable, Sendable, Equatable {
     /// If empty, uses `defaultSavePath`.
     public var diskSpaceMonitorPath: String
 
+    // VPN protection ---------------------------------------------------------------
+
+    /// Master toggle: when true, VPNMonitor actively detects and binds
+    /// to the VPN network interface.
+    public var vpnEnabled: Bool
+    /// When true and VPN drops, all torrents are paused immediately.
+    public var vpnKillSwitch: Bool
+    /// When true, libtorrent's outgoing_interfaces and listen_interfaces
+    /// are bound to the VPN adapter so no traffic leaks to the default
+    /// route.
+    public var vpnBindInterface: Bool
+    /// Interface name prefix to detect the VPN tunnel (e.g. "utun" for
+    /// PIA, WireGuard, and most macOS VPN clients).
+    public var vpnInterfacePrefix: String
+    /// How often (in seconds) the monitor checks for VPN status.
+    public var vpnMonitorIntervalSeconds: Int
+
     // *arr integration ----------------------------------------------------------
 
     /// Connected Sonarr / Radarr endpoints for proactive re-search.
@@ -237,6 +254,11 @@ public struct Settings: Codable, Sendable, Equatable {
             healthStallMinutes: 30,
             healthReannounceOnStall: true,
             bandwidthSchedule: [],
+            vpnEnabled: false,
+            vpnKillSwitch: true,
+            vpnBindInterface: true,
+            vpnInterfacePrefix: "utun",
+            vpnMonitorIntervalSeconds: 5,
             diskSpaceMinimumGB: nil,
             diskSpaceMonitorPath: "",
             arrEndpoints: [],
@@ -261,6 +283,11 @@ public struct Settings: Codable, Sendable, Equatable {
         self.healthStallMinutes = try c.decodeIfPresent(Int.self, forKey: .healthStallMinutes) ?? 30
         self.healthReannounceOnStall = try c.decodeIfPresent(Bool.self, forKey: .healthReannounceOnStall) ?? true
         self.bandwidthSchedule = try c.decodeIfPresent([BandwidthRule].self, forKey: .bandwidthSchedule) ?? []
+        self.vpnEnabled = try c.decodeIfPresent(Bool.self, forKey: .vpnEnabled) ?? false
+        self.vpnKillSwitch = try c.decodeIfPresent(Bool.self, forKey: .vpnKillSwitch) ?? true
+        self.vpnBindInterface = try c.decodeIfPresent(Bool.self, forKey: .vpnBindInterface) ?? true
+        self.vpnInterfacePrefix = try c.decodeIfPresent(String.self, forKey: .vpnInterfacePrefix) ?? "utun"
+        self.vpnMonitorIntervalSeconds = try c.decodeIfPresent(Int.self, forKey: .vpnMonitorIntervalSeconds) ?? 5
         self.diskSpaceMinimumGB = try c.decodeIfPresent(Int.self, forKey: .diskSpaceMinimumGB)
         self.diskSpaceMonitorPath = try c.decodeIfPresent(String.self, forKey: .diskSpaceMonitorPath) ?? ""
         self.arrEndpoints = try c.decodeIfPresent([ArrEndpoint].self, forKey: .arrEndpoints) ?? []
@@ -283,6 +310,11 @@ public struct Settings: Codable, Sendable, Equatable {
         healthStallMinutes: Int,
         healthReannounceOnStall: Bool,
         bandwidthSchedule: [BandwidthRule] = [],
+        vpnEnabled: Bool = false,
+        vpnKillSwitch: Bool = true,
+        vpnBindInterface: Bool = true,
+        vpnInterfacePrefix: String = "utun",
+        vpnMonitorIntervalSeconds: Int = 5,
         diskSpaceMinimumGB: Int? = nil,
         diskSpaceMonitorPath: String = "",
         arrEndpoints: [ArrEndpoint] = [],
@@ -303,6 +335,11 @@ public struct Settings: Codable, Sendable, Equatable {
         self.healthStallMinutes = healthStallMinutes
         self.healthReannounceOnStall = healthReannounceOnStall
         self.bandwidthSchedule = bandwidthSchedule
+        self.vpnEnabled = vpnEnabled
+        self.vpnKillSwitch = vpnKillSwitch
+        self.vpnBindInterface = vpnBindInterface
+        self.vpnInterfacePrefix = vpnInterfacePrefix
+        self.vpnMonitorIntervalSeconds = vpnMonitorIntervalSeconds
         self.diskSpaceMinimumGB = diskSpaceMinimumGB
         self.diskSpaceMonitorPath = diskSpaceMonitorPath
         self.arrEndpoints = arrEndpoints

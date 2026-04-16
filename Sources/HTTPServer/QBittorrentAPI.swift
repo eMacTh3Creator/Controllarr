@@ -580,6 +580,12 @@ public enum QBittorrentAPI {
                         )
                     }
                 }
+                // VPN protection
+                if let v = dict["vpnEnabled"] as? Bool { s.vpnEnabled = v }
+                if let v = dict["vpnKillSwitch"] as? Bool { s.vpnKillSwitch = v }
+                if let v = dict["vpnBindInterface"] as? Bool { s.vpnBindInterface = v }
+                if let v = dict["vpnInterfacePrefix"] as? String { s.vpnInterfacePrefix = v }
+                if let v = dict["vpnMonitorIntervalSeconds"] as? Int { s.vpnMonitorIntervalSeconds = v }
                 if dict.keys.contains("diskSpaceMinimumGB") {
                     s.diskSpaceMinimumGB = dict["diskSpaceMinimumGB"] as? Int
                 }
@@ -672,6 +678,20 @@ public enum QBittorrentAPI {
             ] as [String: Any])
         }
 
+        // MARK: Controllarr: VPN monitor
+
+        router.get("/api/controllarr/vpn") { _, _ -> Response in
+            let status = await services.vpnMonitor.snapshot()
+            return json([
+                "isConnected": status.isConnected,
+                "interfaceName": status.interfaceName ?? "" as Any,
+                "interfaceIP": status.interfaceIP ?? "" as Any,
+                "killSwitchEngaged": status.killSwitchEngaged,
+                "pausedCount": status.pausedHashes.count,
+                "boundToVPN": status.boundToVPN,
+            ] as [String: Any])
+        }
+
         // MARK: Controllarr: *arr notifier
 
         router.get("/api/controllarr/arr") { _, _ -> Response in
@@ -752,6 +772,11 @@ public enum QBittorrentAPI {
             "minimumSeedTimeMinutes": s.minimumSeedTimeMinutes,
             "healthStallMinutes": s.healthStallMinutes,
             "healthReannounceOnStall": s.healthReannounceOnStall,
+            "vpnEnabled": s.vpnEnabled,
+            "vpnKillSwitch": s.vpnKillSwitch,
+            "vpnBindInterface": s.vpnBindInterface,
+            "vpnInterfacePrefix": s.vpnInterfacePrefix,
+            "vpnMonitorIntervalSeconds": s.vpnMonitorIntervalSeconds,
             "diskSpaceMonitorPath": s.diskSpaceMonitorPath,
             "arrReSearchAfterHours": s.arrReSearchAfterHours,
             "bandwidthSchedule": s.bandwidthSchedule.map { rule -> [String: Any] in

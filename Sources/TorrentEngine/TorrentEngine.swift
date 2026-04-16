@@ -472,6 +472,19 @@ public actor TorrentEngine {
         session.setListenPort(port)
     }
 
+    /// Directly set libtorrent's listen_interfaces string. Used by VPN
+    /// monitor to bind listen to the VPN adapter IP + current port.
+    public func setListenInterfaces(_ interfaces: String) {
+        session.setListenInterfacesString(interfaces)
+    }
+
+    /// Bind all outgoing peer/tracker traffic to a specific network
+    /// interface (e.g. "utun4" or "10.0.0.1"). Empty string reverts
+    /// to OS default routing.
+    public func setOutgoingInterface(_ name: String) {
+        session.setOutgoingInterface(name)
+    }
+
     /// Set global download/upload rate limits. 0 = unlimited.
     public func setRateLimits(downloadKBps: Int?, uploadKBps: Int?) {
         session.setRateLimitsDownloadKBps(Int32(downloadKBps ?? 0), uploadKBps: Int32(uploadKBps ?? 0))

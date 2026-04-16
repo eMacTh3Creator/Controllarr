@@ -8,7 +8,7 @@
 
 Controllarr uses [libtorrent-rasterbar](https://www.libtorrent.org/) as its engine and wraps it in a Swift + SwiftUI desktop app with both a native macOS window and an embedded React web UI. It speaks the qBittorrent Web API so existing *arr apps can point at it with zero extra configuration.
 
-**Status:** v1.0 — production-ready `.app` with native UI, qBittorrent Web API compatibility, React WebUI, post-processing pipeline, seeding policy, health monitoring, bandwidth scheduler, per-torrent file/tracker/peer detail, Keychain credential storage, disk-space-aware auto-pause, and *arr re-search integration. See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
+**Status:** v1.1 — production-ready `.app` with native UI, qBittorrent Web API compatibility, React WebUI, post-processing pipeline, seeding policy, health monitoring, bandwidth scheduler, per-torrent file/tracker/peer detail, Keychain credential storage, disk-space-aware auto-pause, *arr re-search integration, and VPN-aware kill switch with interface binding. See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
 
 ## Features
 
@@ -23,12 +23,14 @@ Controllarr uses [libtorrent-rasterbar](https://www.libtorrent.org/) as its engi
 - **Health monitoring** — stall detection with reason codes, auto-reannounce recovery
 - **Bandwidth scheduler** — time-of-day download/upload rate limiting
 - **Keychain credential storage** for the WebUI password and *arr API keys
+- **VPN kill switch** — detects VPN tunnel interfaces (PIA, WireGuard, etc.) and pauses all torrents instantly when the VPN drops; auto-resumes on reconnect
+- **VPN interface binding** — binds libtorrent's outgoing and listen interfaces to the VPN adapter so torrent traffic never leaks through the default route
 - **Disk-space-aware auto-pause** — monitors free space and pauses downloads when below threshold
 - ***arr re-search integration** — proactive Sonarr/Radarr callbacks when torrents stall
 - **Session auth with expiry** — 1-hour token TTL, CORS support, cookie-based middleware
 - **Per-torrent save path** — `savepath` override from *arr apps wired through to libtorrent
 - **.torrent file upload** from the browser WebUI (drag-and-drop or file picker)
-- **25-test suite** covering schema migration, archive detection, policy enums, Keychain ops, disk-space, and *arr endpoints
+- **30-test suite** covering schema migration, archive detection, policy enums, Keychain ops, disk-space, *arr endpoints, and VPN monitor
 - **Sparkle auto-update** — checks for new versions via appcast and installs in-place
 - **Modern React web UI** with live stats, log viewer, settings editor, full category management, and torrent file upload
 
