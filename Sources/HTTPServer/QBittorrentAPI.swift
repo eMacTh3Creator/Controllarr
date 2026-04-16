@@ -27,7 +27,8 @@ public enum QBittorrentAPI {
     static let qbittorrentVersion = "v4.6.0"
     static let webAPIVersion      = "2.9.3"
 
-    public static func install(on router: Router<BasicRequestContext>, services: HTTPServer.Services) {
+    @discardableResult
+    public static func install(on router: Router<BasicRequestContext>, services: HTTPServer.Services) -> SessionStore {
         let sessions = SessionStore()
 
         // MARK: /auth
@@ -55,7 +56,10 @@ public enum QBittorrentAPI {
             )
         }
 
-        router.post("/api/v2/auth/logout") { _, _ -> Response in
+        router.post("/api/v2/auth/logout") { request, _ -> Response in
+            if let sid = Self.extractSID(from: request) {
+                await sessions.revoke(sid)
+            }
             return Response(status: .ok)
         }
 
@@ -100,6 +104,25 @@ public enum QBittorrentAPI {
                 }
             }
             return Response(status: .ok)
+        }
+
+        // MARK: /transfer
+
+        router.get("/api/v2/transfer/info") { _, _ -> Response in
+            let s = await services.engine.sessionStats()
+            return json([
+                "dl_info_speed": s.downloadRate,
+                "dl_info_data": s.totalDownloaded,
+                "up_info_speed": s.uploadRate,
+                "up_info_data": s.totalUploaded,
+                "dl_rate_limit": 0,
+                "up_rate_limit": 0,
+                "dht_nodes": 0,
+                "connection_status": s.hasIncomingConnections ? "connected" : "firewalled",
+            ] as [String: Any])
+        }
+        router.get("/api/v2/transfer/speedLimitsMode") { _, _ -> Response in
+            plainText("0")
         }
 
         // MARK: /torrents/info
@@ -194,10 +217,13 @@ public enum QBittorrentAPI {
                 paused = (form["paused"]?.lowercased() == "true")
             }
 
+            // Normalize empty savepath to nil.
+            let explicitPath = savePath?.isEmpty == false ? savePath : nil
+
             var addedHashes: [String] = []
             for u in urls {
                 do {
-                    let h = try await services.engine.addMagnet(u, category: category)
+                    let h = try await services.engine.addMagnet(u, category: category, explicitSavePath: explicitPath)
                     if !h.isEmpty { addedHashes.append(h) }
                     if let category { await services.store.noteCategoryForHash(h, category: category) }
                 } catch {
@@ -209,7 +235,7 @@ public enum QBittorrentAPI {
                     .appendingPathComponent("ctrl-\(UUID().uuidString).torrent")
                 try? blob.data.write(to: tmp)
                 do {
-                    let h = try await services.engine.addTorrentFile(at: tmp, category: category)
+                    let h = try await services.engine.addTorrentFile(at: tmp, category: category, explicitSavePath: explicitPath)
                     if !h.isEmpty { addedHashes.append(h) }
                     if let category { await services.store.noteCategoryForHash(h, category: category) }
                 } catch {
@@ -221,7 +247,6 @@ public enum QBittorrentAPI {
             if paused {
                 for h in addedHashes { _ = await services.engine.pause(infoHash: h) }
             }
-            _ = savePath // save path per-torrent override not yet wired through the shim
             return plainText("Ok.")
         }
 
@@ -681,6 +706,22 @@ public enum QBittorrentAPI {
             }
             return json(out)
         }
+
+        return sessions
+    }
+
+    // MARK: - Cookie helper
+
+    /// Extract the SID value from the `Cookie` request header.
+    static func extractSID(from request: Request) -> String? {
+        guard let cookie = request.headers[.cookie] else { return nil }
+        for part in cookie.split(separator: ";") {
+            let trimmed = part.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("SID=") {
+                return String(trimmed.dropFirst(4))
+            }
+        }
+        return nil
     }
 
     // MARK: - Serialization helpers
@@ -774,12 +815,42 @@ public enum QBittorrentAPI {
 
 // MARK: - Session store
 
-actor SessionStore {
-    private var tokens: Set<String> = []
+public actor SessionStore {
+    private static let maxTokens = 50
+    private static let tokenLifetime: TimeInterval = 3600 // 1 hour
+
+    private var tokens: [String: Date] = [:]  // sid -> creation date
+
     func issue() -> String {
+        // If at capacity, prune expired first
+        if tokens.count >= Self.maxTokens {
+            pruneExpired()
+        }
+        // If still at capacity, drop the oldest
+        if tokens.count >= Self.maxTokens,
+           let oldest = tokens.min(by: { $0.value < $1.value })?.key {
+            tokens.removeValue(forKey: oldest)
+        }
         let sid = UUID().uuidString.replacingOccurrences(of: "-", with: "")
-        tokens.insert(sid)
+        tokens[sid] = Date()
         return sid
     }
-    func valid(_ sid: String) -> Bool { tokens.contains(sid) }
+
+    func valid(_ sid: String) -> Bool {
+        guard let created = tokens[sid] else { return false }
+        if Date().timeIntervalSince(created) > Self.tokenLifetime {
+            tokens.removeValue(forKey: sid)
+            return false
+        }
+        return true
+    }
+
+    func revoke(_ sid: String) {
+        tokens.removeValue(forKey: sid)
+    }
+
+    private func pruneExpired() {
+        let now = Date()
+        tokens = tokens.filter { now.timeIntervalSince($0.value) <= Self.tokenLifetime }
+    }
 }

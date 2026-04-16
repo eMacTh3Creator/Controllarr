@@ -220,6 +220,18 @@ export const api = {
     await form('/api/v2/torrents/add', fields)
   },
 
+  async addTorrentFile(file: File, category?: string): Promise<void> {
+    const body = new FormData()
+    body.append('torrents', file)
+    if (category) body.append('category', category)
+    const res = await fetch('/api/v2/torrents/add', {
+      method: 'POST',
+      body,
+      credentials: 'include',
+    })
+    if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
+  },
+
   async pause(hash: string) {
     await form('/api/v2/torrents/pause', { hashes: hash })
   },

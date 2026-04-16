@@ -81,12 +81,15 @@ public actor HTTPServer {
 
         let router = Router()
         router.add(middleware: LogRequestsMiddleware())
+        router.add(middleware: CORSMiddleware())
 
         // qBittorrent Web API v2 compat surface.
-        QBittorrentAPI.install(
+        let sessions = QBittorrentAPI.install(
             on: router,
             services: services
         )
+
+        router.add(middleware: AuthMiddleware(sessions: sessions))
 
         // Static WebUI. Registered last so /api/* routes win.
         StaticWebUI.install(on: router, rootDirectory: configuration.webUIRoot)
@@ -95,7 +98,7 @@ public actor HTTPServer {
             router: router,
             configuration: .init(
                 address: .hostname(configuration.host, port: configuration.port),
-                serverName: "Controllarr/0.1"
+                serverName: "Controllarr/1.0"
             )
         )
 
@@ -133,5 +136,73 @@ struct LogRequestsMiddleware<Context: RequestContext>: RouterMiddleware {
         let ms = Int(Date().timeIntervalSince(start) * 1000)
         NSLog("[HTTP] \(request.method.rawValue) \(request.uri.path) -> \(response.status.code) (\(ms)ms)")
         return response
+    }
+}
+
+/// CORS middleware — allows cross-origin requests from the WebUI dev server
+/// and any *arr instance that talks to Controllarr. Added before auth so
+/// OPTIONS preflight is never blocked by session checks.
+struct CORSMiddleware<Context: RequestContext>: RouterMiddleware {
+    func handle(
+        _ request: Request,
+        context: Context,
+        next: (Request, Context) async throws -> Response
+    ) async throws -> Response {
+        // Preflight
+        if request.method == .options {
+            var headers = HTTPFields()
+            headers[.accessControlAllowOrigin] = "*"
+            headers[.accessControlAllowMethods] = "GET, POST, DELETE, OPTIONS"
+            headers[.accessControlAllowHeaders] = "Content-Type, Cookie"
+            headers[.accessControlAllowCredentials] = "true"
+            return Response(status: .noContent, headers: headers)
+        }
+        var response = try await next(request, context)
+        response.headers[.accessControlAllowOrigin] = "*"
+        response.headers[.accessControlAllowMethods] = "GET, POST, DELETE, OPTIONS"
+        response.headers[.accessControlAllowHeaders] = "Content-Type, Cookie"
+        response.headers[.accessControlAllowCredentials] = "true"
+        return response
+    }
+}
+
+/// Session-auth middleware — rejects unauthenticated `/api/` requests with 403.
+/// Exempt paths: login, logout, version probes, and non-API (static WebUI).
+struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
+    let sessions: SessionStore
+
+    /// Paths that never require a session cookie.
+    private static var exemptPaths: Set<String> {
+        [
+            "/api/v2/auth/login",
+            "/api/v2/auth/logout",
+            "/api/v2/app/version",
+            "/api/v2/app/webapiVersion",
+        ]
+    }
+
+    func handle(
+        _ request: Request,
+        context: Context,
+        next: (Request, Context) async throws -> Response
+    ) async throws -> Response {
+        let path = request.uri.path
+        // Only gate /api/ routes
+        guard path.hasPrefix("/api/") else {
+            return try await next(request, context)
+        }
+        // Skip exempt endpoints
+        if Self.exemptPaths.contains(path) {
+            return try await next(request, context)
+        }
+        // Validate SID cookie
+        guard let sid = QBittorrentAPI.extractSID(from: request),
+              await sessions.valid(sid) else {
+            return Response(
+                status: .forbidden,
+                body: .init(byteBuffer: ByteBuffer(string: "Forbidden."))
+            )
+        }
+        return try await next(request, context)
     }
 }

@@ -118,6 +118,8 @@ export function App() {
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null)
   const [magnet, setMagnet] = useState('')
   const [magnetCategory, setMagnetCategory] = useState('')
+  const [torrentFile, setTorrentFile] = useState<File | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
   const [logFilter, setLogFilter] = useState('')
   const [categoryModal, setCategoryModal] = useState<CategoryModalState | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -261,16 +263,24 @@ export function App() {
     }
   }
 
-  async function handleAddMagnet(event: FormEvent<HTMLFormElement>) {
+  async function handleAddTorrent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const uri = magnet.trim()
-    if (!uri) return
+    const file = torrentFile
+    if (!uri && !file) return
 
+    setIsUploading(true)
     await runAction(async () => {
-      await api.addMagnet(uri, magnetCategory.trim() || undefined)
+      const category = magnetCategory.trim() || undefined
+      const promises: Promise<void>[] = []
+      if (uri) promises.push(api.addMagnet(uri, category))
+      if (file) promises.push(api.addTorrentFile(file, category))
+      await Promise.all(promises)
       setMagnet('')
       setMagnetCategory('')
+      setTorrentFile(null)
     })
+    setIsUploading(false)
   }
 
   function updateSettings(next: Settings) {
@@ -447,9 +457,12 @@ export function App() {
                     categories={snapshot.categories}
                     magnet={magnet}
                     magnetCategory={magnetCategory}
+                    torrentFile={torrentFile}
+                    isUploading={isUploading}
                     onMagnetChange={setMagnet}
                     onCategoryChange={setMagnetCategory}
-                    onSubmit={handleAddMagnet}
+                    onFileChange={setTorrentFile}
+                    onSubmit={handleAddTorrent}
                     onPause={(hash) => void runAction(() => api.pause(hash))}
                     onResume={(hash) => void runAction(() => api.resume(hash))}
                     onRemove={(hash, deleteFiles) =>
@@ -573,8 +586,11 @@ function TorrentsTab({
   categories,
   magnet,
   magnetCategory,
+  torrentFile,
+  isUploading,
   onMagnetChange,
   onCategoryChange,
+  onFileChange,
   onSubmit,
   onPause,
   onResume,
@@ -584,8 +600,11 @@ function TorrentsTab({
   categories: Category[]
   magnet: string
   magnetCategory: string
+  torrentFile: File | null
+  isUploading: boolean
   onMagnetChange: (value: string) => void
   onCategoryChange: (value: string) => void
+  onFileChange: (file: File | null) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   onPause: (hash: string) => void
   onResume: (hash: string) => void
@@ -596,6 +615,7 @@ function TorrentsTab({
   const [files, setFiles] = useState<any[]>([])
   const [trackers, setTrackers] = useState<any[]>([])
   const [peers, setPeers] = useState<any[]>([])
+  const [detailError, setDetailError] = useState<string | null>(null)
 
   const selectedTorrent = torrents.find((t) => t.hash === selectedHash) ?? null
 
@@ -614,9 +634,13 @@ function TorrentsTab({
           setFiles(f)
           setTrackers(t)
           setPeers(p)
+          setDetailError(null)
         }
-      } catch {
-        // silently ignore — detail panel is best-effort
+      } catch (err) {
+        if (!cancelled) {
+          setDetailError('Failed to load details')
+        }
+        // auto-retries on next poll interval
       }
     }
 
@@ -637,6 +661,7 @@ function TorrentsTab({
       setFiles([])
       setTrackers([])
       setPeers([])
+      setDetailError(null)
     }
   }
 
@@ -668,8 +693,8 @@ function TorrentsTab({
 
       <form className="form-panel accent-panel" onSubmit={onSubmit}>
         <div className="form-panel-header">
-          <h3>Add magnet</h3>
-          <p>Assign a category now so post-processing and file filters apply immediately.</p>
+          <h3>Add torrent</h3>
+          <p>Paste a magnet URI, select a .torrent file, or both. Assign a category so post-processing and file filters apply immediately.</p>
         </div>
 
         <div className="form-grid compact">
@@ -682,6 +707,26 @@ function TorrentsTab({
               onChange={(event) => onMagnetChange(event.target.value)}
             />
           </label>
+
+          <label className="field wide">
+            <span>.torrent file</span>
+            <input
+              type="file"
+              accept=".torrent"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null
+                onFileChange(file)
+              }}
+            />
+          </label>
+          {torrentFile && (
+            <div className="field wide" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span className="pill blue">{torrentFile.name}</span>
+              <button type="button" onClick={() => onFileChange(null)} style={{ padding: '0.25rem 0.5rem' }}>
+                Clear
+              </button>
+            </div>
+          )}
 
           <label className="field">
             <span>Category</span>
@@ -697,8 +742,8 @@ function TorrentsTab({
         </div>
 
         <div className="button-row">
-          <button className="primary" type="submit" disabled={!magnet.trim()}>
-            Add magnet
+          <button className="primary" type="submit" disabled={(!magnet.trim() && !torrentFile) || isUploading}>
+            {isUploading ? 'Uploading…' : torrentFile && magnet.trim() ? 'Add magnet + file' : torrentFile ? 'Upload .torrent' : 'Add magnet'}
           </button>
         </div>
       </form>
@@ -815,6 +860,8 @@ function TorrentsTab({
                   </button>
                 ))}
               </div>
+
+              {detailError && <Banner tone="error" message={detailError} />}
 
               {detailTab === 'files' && (
                 files.length === 0 ? (

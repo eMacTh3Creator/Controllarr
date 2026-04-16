@@ -235,8 +235,13 @@ public actor TorrentEngine {
 
     // MARK: Adding
 
-    public func addMagnet(_ uri: String, category: String? = nil) async throws -> String {
-        let savePath = try await resolvedSavePath(for: category)
+    public func addMagnet(_ uri: String, category: String? = nil, explicitSavePath: String? = nil) async throws -> String {
+        let savePath: String?
+        if let explicitSavePath {
+            savePath = explicitSavePath
+        } else {
+            savePath = try await resolvedSavePath(for: category)
+        }
         do {
             try session.addMagnet(uri, savePath: savePath)
         } catch {
@@ -249,8 +254,13 @@ public actor TorrentEngine {
         return hash ?? ""
     }
 
-    public func addTorrentFile(at path: URL, category: String? = nil) async throws -> String {
-        let savePath = try await resolvedSavePath(for: category)
+    public func addTorrentFile(at path: URL, category: String? = nil, explicitSavePath: String? = nil) async throws -> String {
+        let savePath: String?
+        if let explicitSavePath {
+            savePath = explicitSavePath
+        } else {
+            savePath = try await resolvedSavePath(for: category)
+        }
         do {
             try session.addTorrentFile(path.path, savePath: savePath)
         } catch {

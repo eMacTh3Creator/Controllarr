@@ -8,7 +8,7 @@
 
 Controllarr uses [libtorrent-rasterbar](https://www.libtorrent.org/) as its engine and wraps it in a Swift + SwiftUI desktop app with both a native macOS window and an embedded React web UI. It speaks the qBittorrent Web API so existing *arr apps can point at it with zero extra configuration.
 
-**Status:** Phase 3 — full-featured `.app` with native UI, qBittorrent Web API compatibility, React WebUI, post-processing pipeline, seeding policy, health monitoring, bandwidth scheduler, and per-torrent file/tracker/peer detail. See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
+**Status:** v1.0 — production-ready `.app` with native UI, qBittorrent Web API compatibility, React WebUI, post-processing pipeline, seeding policy, health monitoring, bandwidth scheduler, per-torrent file/tracker/peer detail, Keychain credential storage, disk-space-aware auto-pause, and *arr re-search integration. See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
 
 ## Features
 
@@ -22,15 +22,18 @@ Controllarr uses [libtorrent-rasterbar](https://www.libtorrent.org/) as its engi
 - **Seeding policy** — per-category or global max ratio / max seed time with hit-and-run protection
 - **Health monitoring** — stall detection with reason codes, auto-reannounce recovery
 - **Bandwidth scheduler** — time-of-day download/upload rate limiting
-- **Keychain credential storage** for the WebUI password
-- **18-test suite** covering schema migration, archive detection, policy enums, and Keychain ops
-- **Modern React web UI** with live stats, log viewer, settings editor, and full category management
+- **Keychain credential storage** for the WebUI password and *arr API keys
+- **Disk-space-aware auto-pause** — monitors free space and pauses downloads when below threshold
+- ***arr re-search integration** — proactive Sonarr/Radarr callbacks when torrents stall
+- **Session auth with expiry** — 1-hour token TTL, CORS support, cookie-based middleware
+- **Per-torrent save path** — `savepath` override from *arr apps wired through to libtorrent
+- **.torrent file upload** from the browser WebUI (drag-and-drop or file picker)
+- **25-test suite** covering schema migration, archive detection, policy enums, Keychain ops, disk-space, and *arr endpoints
+- **Modern React web UI** with live stats, log viewer, settings editor, full category management, and torrent file upload
 
 ## Planned
 
-- *arr re-search integration (proactive Sonarr/Radarr callbacks on stalled torrents)
 - Sparkle auto-update
-- Disk-space-aware auto-pause
 
 ## Requirements
 
