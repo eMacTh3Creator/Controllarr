@@ -1,4 +1,4 @@
-# Controllarr v1.4.0
+# Controllarr v2.0.0
 
 This release focuses on operator control — WebUI hardening, peer discovery
 toggles, connection-count ceilings, category-move workflows, and table
@@ -66,7 +66,7 @@ sorting/filtering in the native UI.
 ## Upgrade notes
 
 Delete nothing — the v1.3.0 settings file is fully backward-compatible
-with v1.4.0. Open Settings once after upgrading to surface the new
+with v2.0.0. Open Settings once after upgrading to surface the new
 peer-discovery and security controls.
 
 ## Known limitations

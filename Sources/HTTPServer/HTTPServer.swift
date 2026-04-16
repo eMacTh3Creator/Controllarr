@@ -133,7 +133,7 @@ public actor HTTPServer {
            !version.isEmpty {
             return "Controllarr/\(version)"
         }
-        return "Controllarr/1.4.0"
+        return "Controllarr/2.0.0"
     }
 }
 

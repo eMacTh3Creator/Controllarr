@@ -8,7 +8,7 @@
 
 Controllarr uses [libtorrent-rasterbar](https://www.libtorrent.org/) as its engine and wraps it in a Swift + SwiftUI desktop app with both a native macOS window and an embedded React web UI. It speaks the qBittorrent Web API so existing *arr apps can point at it with zero extra configuration.
 
-**Status:** v1.4.0 — adds DHT / PeX / LSD peer-discovery toggles, connection-count ceilings, WebUI security headers (X-Frame-Options, CSP frame-ancestors, Referrer-Policy), CIDR IP allowlist, category-aware file moves (torrent reassignment and category-path edits both prompt to relocate files), sortable torrent columns with status-filter dropdown (All / Downloading / Seeding / Completed / Running / Stopped / Active / Inactive / Stalled / Moving / Errored), persisted column widths, a redesigned Settings screen with sidebar tabs and search, per-category torrent list with its own status filter, and menu-bar behavior options (start-minimized, close-to-menu-bar). See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
+**Status:** v2.0.0 — adds DHT / PeX / LSD peer-discovery toggles, connection-count ceilings, WebUI security headers (X-Frame-Options, CSP frame-ancestors, Referrer-Policy), CIDR IP allowlist, category-aware file moves (torrent reassignment and category-path edits both prompt to relocate files), sortable torrent columns with status-filter dropdown (All / Downloading / Seeding / Completed / Running / Stopped / Active / Inactive / Stalled / Moving / Errored), persisted column widths, a redesigned Settings screen with sidebar tabs and search, per-category torrent list with its own status filter, and menu-bar behavior options (start-minimized, close-to-menu-bar). See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
 
 The next major step is a larger **v1.5** release that turns Controllarr from "a Mac-native qBittorrent replacement for *arr apps" into a true download orchestration platform with deeper automation, remote operations, security, and observability. The current roadmap lives in [docs/V1_5_ROADMAP.md](docs/V1_5_ROADMAP.md).
 
@@ -63,7 +63,7 @@ If you want the detailed feature slate, recommended scope, and stretch goals, st
 - [docs/OPERATIONS.md](docs/OPERATIONS.md) — headless daemon usage, backup/export/restore, recovery rules, post-processing retries, and disk-space operations
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — large-library behavior, runtime polling model, and scaling guidance for 1,000+ torrents
 - [docs/V1_5_ROADMAP.md](docs/V1_5_ROADMAP.md) — proposed big-ticket roadmap for the v1.5 release
-- [RELEASE_NOTES_v1.4.0.md](RELEASE_NOTES_v1.4.0.md) — peer-discovery toggles, connection limits, WebUI hardening, category-aware file moves, Torrents sort/filter, and Settings redesign
+- [RELEASE_NOTES_v2.0.0.md](RELEASE_NOTES_v2.0.0.md) — peer-discovery toggles, connection limits, WebUI hardening, category-aware file moves, Torrents sort/filter, and Settings redesign
 - [RELEASE_NOTES_v1.3.0.md](RELEASE_NOTES_v1.3.0.md) — performance and scalability improvements for large torrent libraries
 - [RELEASE_NOTES_v1.2.1.md](RELEASE_NOTES_v1.2.1.md) — network diagnostics and remote-LAN VPN troubleshooting
 - [RELEASE_NOTES_v0.2.0.md](RELEASE_NOTES_v0.2.0.md) — native UI, post-processing, seeding policy, and health monitor release
