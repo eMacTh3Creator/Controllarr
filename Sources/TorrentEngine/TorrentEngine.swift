@@ -238,6 +238,11 @@ public actor TorrentEngine {
             listenPort: listenPort,
             bindAllInterfaces: false
         )
+        // Point the shim at the resume directory so add-time sidecars
+        // (.magnet / .torrent / .path) and .fastresume files all live
+        // side-by-side. Must happen BEFORE loadResumeData so the restore
+        // pass can also see sidecars.
+        self.session.setMetadataDirectory(resumeDataDirectory.path)
         // Restore any previously-persisted torrents.
         self.session.loadResumeData(from: resumeDataDirectory.path)
     }

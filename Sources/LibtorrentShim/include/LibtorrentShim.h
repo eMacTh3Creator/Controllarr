@@ -198,12 +198,21 @@ typedef NS_ENUM(NSInteger, CTRLTorrentState) {
 
 // MARK: Lifecycle
 
+/// Tell the session where to write per-torrent recovery metadata
+/// (`<infohash>.magnet`, `<infohash>.torrent`, `<infohash>.path`).
+/// These sidecars are written synchronously at add-time and used as a
+/// fallback on restart when a `.fastresume` is missing or unreadable
+/// (e.g. force-quit before libtorrent could emit resume data).
+- (void)setMetadataDirectory:(NSString *)directory;
+
 /// Ask libtorrent to serialize resume data for every torrent and write it
 /// under `directory` as `<infohash>.fastresume`. Safe to call periodically.
 - (void)saveResumeDataTo:(NSString *)directory;
 
 /// Load any `<infohash>.fastresume` files found under `directory` and
-/// re-add the torrents. Counterpart to -saveResumeDataTo:.
+/// re-add the torrents. Then scan the metadata directory for `.magnet`
+/// and `.torrent` sidecars and re-add any torrent whose info hash did
+/// not come back via fastresume. Counterpart to -saveResumeDataTo:.
 - (void)loadResumeDataFrom:(NSString *)directory;
 
 - (void)shutdown;

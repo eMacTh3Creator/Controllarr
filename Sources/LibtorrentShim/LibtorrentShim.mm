@@ -168,11 +168,55 @@ static int ctrl_balanced_hashing_threads() {
 @implementation CTRLSession {
     std::unique_ptr<lt::session> _session;
     NSString *_savePath;
+    NSString *_metadataDir;   // Sidecar directory for .magnet / .torrent fallbacks.
     uint16_t  _listenPort;
     BOOL      _bindAll;
     // Cheap cache so statsForInfoHash: and moveTorrent: don't have to
     // rescan get_torrents() every call.
     std::unordered_map<std::string, lt::torrent_handle> _handlesByHash;
+}
+
+// MARK: Add-time sidecar helpers
+
+- (void)writeMagnetSidecarFor:(NSString *)hashHex
+                    magnetURI:(NSString *)magnetURI
+                     savePath:(NSString *)savePath {
+    if (!_metadataDir.length || !hashHex.length || !magnetURI.length) return;
+    NSFileManager *fm = NSFileManager.defaultManager;
+    [fm createDirectoryAtPath:_metadataDir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *path = [_metadataDir stringByAppendingPathComponent:
+                      [hashHex stringByAppendingString:@".magnet"]];
+    // Line 1 = magnet URI, line 2 = save path (may be empty).
+    NSString *body = [NSString stringWithFormat:@"%@\n%@\n",
+                      magnetURI, savePath ?: @""];
+    [body writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
+- (void)writeTorrentSidecarFor:(NSString *)hashHex
+                    sourcePath:(NSString *)sourcePath
+                      savePath:(NSString *)savePath {
+    if (!_metadataDir.length || !hashHex.length || !sourcePath.length) return;
+    NSFileManager *fm = NSFileManager.defaultManager;
+    [fm createDirectoryAtPath:_metadataDir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSData *bytes = [NSData dataWithContentsOfFile:sourcePath];
+    if (!bytes) return;
+    NSString *torrentPath = [_metadataDir stringByAppendingPathComponent:
+                             [hashHex stringByAppendingString:@".torrent"]];
+    [bytes writeToFile:torrentPath atomically:YES];
+    NSString *metaPath = [_metadataDir stringByAppendingPathComponent:
+                          [hashHex stringByAppendingString:@".path"]];
+    NSString *body = [(savePath ?: @"") stringByAppendingString:@"\n"];
+    [body writeToFile:metaPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
+- (void)deleteSidecarsFor:(NSString *)hashHex {
+    if (!_metadataDir.length || !hashHex.length) return;
+    NSFileManager *fm = NSFileManager.defaultManager;
+    for (NSString *ext in @[ @".fastresume", @".magnet", @".torrent", @".path" ]) {
+        NSString *path = [_metadataDir stringByAppendingPathComponent:
+                          [hashHex stringByAppendingString:ext]];
+        [fm removeItemAtPath:path error:nil];
+    }
 }
 
 - (instancetype)initWithSavePath:(NSString *)savePath
@@ -186,7 +230,7 @@ static int ctrl_balanced_hashing_threads() {
         lt::settings_pack pack;
         pack.set_str(lt::settings_pack::listen_interfaces,
                      ctrl_build_listen_interfaces(port, bindAll).UTF8String);
-        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.0.0 libtorrent/2.0");
+        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.0.1 libtorrent/2.0");
         pack.set_int(lt::settings_pack::alert_mask,
                      lt::alert_category::error
                      | lt::alert_category::status
@@ -225,7 +269,8 @@ static int ctrl_balanced_hashing_threads() {
         if (error) *error = ctrl_error_from_ec(ec);
         return NO;
     }
-    atp.save_path = (savePath.length ? savePath.UTF8String : _savePath.UTF8String);
+    NSString *effectiveSavePath = savePath.length ? savePath : _savePath;
+    atp.save_path = effectiveSavePath.UTF8String;
     lt::torrent_handle h = _session->add_torrent(std::move(atp), ec);
     if (ec || !h.is_valid()) {
         if (error) *error = ctrl_error_from_ec(ec);
@@ -233,6 +278,11 @@ static int ctrl_balanced_hashing_threads() {
     }
     std::string ih = h.info_hashes().get_best().to_string();
     _handlesByHash[ih] = h;
+    // Write a sidecar so a crash / force-quit before metadata arrives
+    // still lets us re-add this torrent on next launch.
+    [self writeMagnetSidecarFor:ctrl_hex_from_bytes(ih)
+                      magnetURI:magnetURI
+                       savePath:effectiveSavePath];
     return YES;
 }
 
@@ -241,7 +291,8 @@ static int ctrl_balanced_hashing_threads() {
                  error:(NSError **)error {
     try {
         lt::add_torrent_params atp = lt::load_torrent_file(path.UTF8String);
-        atp.save_path = (savePath.length ? savePath.UTF8String : _savePath.UTF8String);
+        NSString *effectiveSavePath = savePath.length ? savePath : _savePath;
+        atp.save_path = effectiveSavePath.UTF8String;
         lt::error_code ec;
         lt::torrent_handle h = _session->add_torrent(std::move(atp), ec);
         if (ec || !h.is_valid()) {
@@ -250,6 +301,11 @@ static int ctrl_balanced_hashing_threads() {
         }
         std::string ih = h.info_hashes().get_best().to_string();
         _handlesByHash[ih] = h;
+        // Copy the .torrent into the metadata dir so a crash before any
+        // .fastresume is written still leaves a recoverable sidecar.
+        [self writeTorrentSidecarFor:ctrl_hex_from_bytes(ih)
+                          sourcePath:path
+                            savePath:effectiveSavePath];
         return YES;
     } catch (std::exception const &e) {
         if (error) {
@@ -300,6 +356,9 @@ static int ctrl_balanced_hashing_threads() {
     if (!h.is_valid()) return NO;
     _session->remove_torrent(h, deleteFiles ? lt::session::delete_files : lt::remove_flags_t{});
     _handlesByHash.erase(ctrl_bytes_from_hex(infoHash));
+    // Sidecars are keyed by the full hex info hash (lowercased in our
+    // writers). Accept any mix-case input here.
+    [self deleteSidecarsFor:infoHash.lowercaseString];
     return YES;
 }
 
@@ -717,9 +776,26 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
     }
 }
 
+- (void)setMetadataDirectory:(NSString *)directory {
+    _metadataDir = [directory copy];
+    if (_metadataDir.length) {
+        [NSFileManager.defaultManager
+            createDirectoryAtPath:_metadataDir
+            withIntermediateDirectories:YES
+            attributes:nil
+            error:nil];
+    }
+}
+
 - (void)loadResumeDataFrom:(NSString *)directory {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSArray<NSString *> *entries = [fm contentsOfDirectoryAtPath:directory error:nil] ?: @[];
+
+    // Track every info hash we successfully add so the sidecar sweep
+    // below can skip duplicates (libtorrent would otherwise reject them).
+    NSMutableSet<NSString *> *loadedHashes = [NSMutableSet set];
+
+    // Pass 1: prefer fastresume — it preserves progress and piece state.
     for (NSString *entry in entries) {
         if (![entry hasSuffix:@".fastresume"]) continue;
         NSString *full = [directory stringByAppendingPathComponent:entry];
@@ -736,10 +812,75 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
             if (atp.save_path.empty()) atp.save_path = _savePath.UTF8String;
             lt::torrent_handle h = _session->add_torrent(std::move(atp), ec);
             if (!ec && h.is_valid()) {
-                _handlesByHash[h.info_hashes().get_best().to_string()] = h;
+                std::string ih = h.info_hashes().get_best().to_string();
+                _handlesByHash[ih] = h;
+                [loadedHashes addObject:ctrl_hex_from_bytes(ih)];
             }
         } catch (std::exception const &e) {
             NSLog(@"[Controllarr] resume load threw: %s", e.what());
+        }
+    }
+
+    // Pass 2: magnet sidecars — covers torrents that never reached
+    // `has_metadata == true` before the last shutdown, so no fastresume
+    // was ever emitted for them.
+    for (NSString *entry in entries) {
+        if (![entry hasSuffix:@".magnet"]) continue;
+        NSString *hashHex = [[entry stringByDeletingPathExtension] lowercaseString];
+        if ([loadedHashes containsObject:hashHex]) continue;
+        NSString *full = [directory stringByAppendingPathComponent:entry];
+        NSString *body = [NSString stringWithContentsOfFile:full
+                                                  encoding:NSUTF8StringEncoding
+                                                     error:nil];
+        if (!body.length) continue;
+        NSArray<NSString *> *lines = [body componentsSeparatedByString:@"\n"];
+        NSString *uri = lines.count > 0 ? lines[0] : @"";
+        NSString *savePath = lines.count > 1 ? lines[1] : @"";
+        if (!uri.length) continue;
+        lt::error_code ec;
+        lt::add_torrent_params atp = lt::parse_magnet_uri(uri.UTF8String, ec);
+        if (ec) {
+            NSLog(@"[Controllarr] magnet sidecar parse failed: %s", ec.message().c_str());
+            continue;
+        }
+        atp.save_path = (savePath.length ? savePath.UTF8String : _savePath.UTF8String);
+        lt::torrent_handle h = _session->add_torrent(std::move(atp), ec);
+        if (!ec && h.is_valid()) {
+            std::string ih = h.info_hashes().get_best().to_string();
+            _handlesByHash[ih] = h;
+            [loadedHashes addObject:ctrl_hex_from_bytes(ih)];
+            NSLog(@"[Controllarr] restored magnet from sidecar: %@", hashHex);
+        }
+    }
+
+    // Pass 3: .torrent file sidecars — same idea for file-based adds
+    // whose fastresume went missing (e.g. truncated, deleted, force-quit
+    // before first save tick).
+    for (NSString *entry in entries) {
+        if (![entry hasSuffix:@".torrent"]) continue;
+        NSString *hashHex = [[entry stringByDeletingPathExtension] lowercaseString];
+        if ([loadedHashes containsObject:hashHex]) continue;
+        NSString *full = [directory stringByAppendingPathComponent:entry];
+        NSString *metaPath = [directory stringByAppendingPathComponent:
+                              [hashHex stringByAppendingString:@".path"]];
+        NSString *savePath = [NSString stringWithContentsOfFile:metaPath
+                                                       encoding:NSUTF8StringEncoding
+                                                          error:nil] ?: @"";
+        savePath = [savePath stringByTrimmingCharactersInSet:
+                    NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        try {
+            lt::add_torrent_params atp = lt::load_torrent_file(full.UTF8String);
+            atp.save_path = (savePath.length ? savePath.UTF8String : _savePath.UTF8String);
+            lt::error_code ec;
+            lt::torrent_handle h = _session->add_torrent(std::move(atp), ec);
+            if (!ec && h.is_valid()) {
+                std::string ih = h.info_hashes().get_best().to_string();
+                _handlesByHash[ih] = h;
+                [loadedHashes addObject:ctrl_hex_from_bytes(ih)];
+                NSLog(@"[Controllarr] restored .torrent from sidecar: %@", hashHex);
+            }
+        } catch (std::exception const &e) {
+            NSLog(@"[Controllarr] .torrent sidecar load threw: %s", e.what());
         }
     }
 }

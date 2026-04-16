@@ -177,6 +177,10 @@ public actor ControllarrRuntime {
 
     /// Background task that polls TorrentEngine ~every 2s and fans the
     /// snapshot out to every stateful service.
+    ///
+    /// Every ~30s the loop also asks the engine to serialize resume data
+    /// so that an unclean shutdown (force-quit, crash, power loss) won't
+    /// leave the torrent list empty on next launch.
     private func startTickLoop() {
         tickTask?.cancel()
         let engine = self.engine
@@ -186,6 +190,8 @@ public actor ControllarrRuntime {
         let recoveryCenter = self.recoveryCenter
         let arrNotifier = self.arrNotifier
         tickTask = Task.detached(priority: .utility) {
+            var tickCount: UInt = 0
+            let resumeSaveEveryNTicks: UInt = 15 // ~30s at a 2s cadence.
             while !Task.isCancelled {
                 await engine.applyPendingFileFilters()
                 let torrents = await engine.pollStats()
@@ -197,6 +203,11 @@ public actor ControllarrRuntime {
                 async let recoveryTick: Void = recoveryCenter.tick(torrents: torrents)
                 async let arrTick: Void = arrNotifier.tick(torrents: torrents)
                 _ = await (recoveryTick, arrTick)
+
+                tickCount &+= 1
+                if tickCount % resumeSaveEveryNTicks == 0 {
+                    await engine.saveResumeData()
+                }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
