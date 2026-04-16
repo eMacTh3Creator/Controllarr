@@ -117,42 +117,70 @@ struct ContentView: View {
 private struct SessionStatusBar: View {
     let vm: RuntimeViewModel
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "circle.fill")
-                .font(.system(size: 8))
-                .foregroundStyle(vm.session.hasIncomingConnections ? .green : .orange)
-            Text("Port \(vm.session.listenPort)")
-                .font(.callout.monospacedDigit())
-            Text("\(vm.session.numTorrents) torrents")
-                .font(.callout.monospacedDigit())
-                .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            // Connection indicator + port
+            HStack(spacing: 4) {
+                Image(systemName: "circle.fill")
+                    .font(.system(size: 6))
+                    .foregroundStyle(vm.session.hasIncomingConnections ? .green : .orange)
+                Text("\(vm.session.listenPort)")
+                    .font(.caption.monospacedDigit())
+            }
+
+            Divider().frame(height: 12)
+
+            // Transfer rates
             Text("↓ \(formatRate(vm.session.downloadRate))")
-                .font(.callout.monospacedDigit())
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(.blue)
             Text("↑ \(formatRate(vm.session.uploadRate))")
-                .font(.callout.monospacedDigit())
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(.green)
+
+            Divider().frame(height: 12)
+
+            Text("\(vm.session.numTorrents)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            + Text(" torrents")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            // VPN pill
             if let vpn = vm.vpnStatus, vm.settings.vpnEnabled {
-                HStack(spacing: 4) {
+                Divider().frame(height: 12)
+                HStack(spacing: 3) {
                     Image(systemName: vpn.isConnected ? "lock.shield.fill" : "lock.shield")
-                        .font(.caption)
+                        .font(.system(size: 9))
                     Text(vpn.isConnected
-                         ? "VPN \(vpn.interfaceName ?? "")"
+                         ? (vpn.interfaceName ?? "VPN")
                          : "VPN down")
-                        .font(.caption)
+                        .font(.caption2)
                 }
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(
+                    (vpn.isConnected ? Color.green : Color.red).opacity(0.15),
+                    in: RoundedRectangle(cornerRadius: 4)
+                )
                 .foregroundStyle(vpn.isConnected ? .green : .red)
             }
+
+            // Disk pressure pill
             if let ds = vm.diskSpaceStatus, ds.isPaused {
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     Image(systemName: "externaldrive.badge.exclamationmark")
-                        .font(.caption)
+                        .font(.system(size: 9))
                     Text("Low disk")
-                        .font(.caption)
+                        .font(.caption2)
                 }
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
                 .foregroundStyle(.orange)
             }
         }
+        .fixedSize()
     }
 }
 
