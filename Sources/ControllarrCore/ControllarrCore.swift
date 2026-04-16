@@ -3,15 +3,10 @@
 //  Controllarr
 //
 //  Wires every service actor — engine, persistence, port watcher, HTTP
-//  server, logger, post-processor, seeding policy, health monitor — into
-//  one boot/shutdown surface. The SwiftUI app target uses this as its
-//  entry point: pass in the WebUI resource directory, call start(), and
-//  you have a running Controllarr.
-//
-//  A single background "tick" task polls the engine for stats every ~2s
-//  and fans the snapshot out to every stateful service. Having one poll
-//  source keeps the services decoupled from the engine and lets the
-//  SwiftUI and WebUI clients share the same refresh cadence.
+//  server, logger, post-processor, seeding policy, health monitor,
+//  bandwidth scheduler — into one boot/shutdown surface. The SwiftUI app
+//  target uses this as its entry point: pass in the WebUI resource
+//  directory, call start(), and you have a running Controllarr.
 //
 
 import Foundation
@@ -31,6 +26,7 @@ public actor ControllarrRuntime {
     public nonisolated let postProcessor: PostProcessor
     public nonisolated let seedingPolicy: SeedingPolicy
     public nonisolated let healthMonitor: HealthMonitor
+    public nonisolated let bandwidthScheduler: BandwidthScheduler
 
     private var tickTask: Task<Void, Never>?
 
@@ -77,6 +73,9 @@ public actor ControllarrRuntime {
         let healthMonitor = HealthMonitor(engine: engine, store: store, logger: logger)
         self.healthMonitor = healthMonitor
 
+        let bandwidthScheduler = BandwidthScheduler(engine: engine, store: store, logger: logger)
+        self.bandwidthScheduler = bandwidthScheduler
+
         let httpConfig = HTTPServer.Configuration(
             host: snapshot.settings.webUIHost,
             port: snapshot.settings.webUIPort,
@@ -98,6 +97,7 @@ public actor ControllarrRuntime {
 
     public func start() async throws {
         await portWatcher.start()
+        await bandwidthScheduler.start()
         try await httpServer.start()
         startTickLoop()
         logger.info("runtime", "Controllarr runtime started")
@@ -108,6 +108,7 @@ public actor ControllarrRuntime {
         tickTask?.cancel()
         tickTask = nil
         await portWatcher.stop()
+        await bandwidthScheduler.stop()
         await httpServer.stop()
         let categories = await engine.snapshotCategories()
         await store.setCategoryMap(categories)

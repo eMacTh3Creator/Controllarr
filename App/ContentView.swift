@@ -140,88 +140,98 @@ struct TorrentsView: View {
     @State private var selectedHash: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            Table(vm.torrents, selection: $selectedHash) {
-                TableColumn("Name") { t in
-                    Text(t.name).lineLimit(1).truncationMode(.middle)
-                }
-                TableColumn("Size") { t in
-                    Text(formatBytes(t.totalWanted)).monospacedDigit()
-                }.width(min: 80, ideal: 90)
-                TableColumn("Progress") { t in
-                    VStack(alignment: .leading, spacing: 2) {
-                        ProgressView(value: Double(t.progress))
-                            .progressViewStyle(.linear)
-                            .frame(width: 110)
-                        Text(String(format: "%.0f%%", t.progress * 100))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
+        VSplitView {
+            VStack(spacing: 0) {
+                Table(vm.torrents, selection: $selectedHash) {
+                    TableColumn("Name") { t in
+                        Text(t.name).lineLimit(1).truncationMode(.middle)
                     }
-                }.width(min: 120, ideal: 140)
-                TableColumn("State") { t in
-                    Text(t.paused ? "paused" : "\(t.state)")
+                    TableColumn("Size") { t in
+                        Text(formatBytes(t.totalWanted)).monospacedDigit()
+                    }.width(min: 80, ideal: 90)
+                    TableColumn("Progress") { t in
+                        VStack(alignment: .leading, spacing: 2) {
+                            ProgressView(value: Double(t.progress))
+                                .progressViewStyle(.linear)
+                                .frame(width: 110)
+                            Text(String(format: "%.0f%%", t.progress * 100))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }.width(min: 120, ideal: 140)
+                    TableColumn("State") { t in
+                        Text(t.paused ? "paused" : "\(t.state)")
+                            .font(.caption)
+                            .foregroundStyle(t.paused ? .orange : .primary)
+                    }.width(min: 70, ideal: 90)
+                    TableColumn("↓") { t in
+                        Text(formatRate(t.downloadRate)).monospacedDigit().font(.caption)
+                    }.width(min: 70, ideal: 80)
+                    TableColumn("↑") { t in
+                        Text(formatRate(t.uploadRate)).monospacedDigit().font(.caption)
+                    }.width(min: 70, ideal: 80)
+                    TableColumn("Peers") { t in
+                        Text("\(t.numPeers)").monospacedDigit().font(.caption)
+                    }.width(min: 50, ideal: 60)
+                    TableColumn("Ratio") { t in
+                        Text(String(format: "%.2f", t.ratio)).monospacedDigit().font(.caption)
+                    }.width(min: 55, ideal: 65)
+                    TableColumn("Category") { t in
+                        Text(t.category ?? "—").font(.caption).foregroundStyle(.secondary)
+                    }.width(min: 80, ideal: 100)
+                }
+
+                Divider()
+                HStack(spacing: 8) {
+                    Button {
+                        magnetURI = ""
+                        addCategory = ""
+                        addError = nil
+                        addOpen = true
+                    } label: {
+                        Label("Add Magnet", systemImage: "plus")
+                    }
+
+                    if let hash = selectedHash, let t = vm.torrents.first(where: { $0.infoHash == hash }) {
+                        Button {
+                            Task { t.paused ? await vm.resume(hash: hash) : await vm.pause(hash: hash) }
+                        } label: {
+                            Label(t.paused ? "Resume" : "Pause", systemImage: t.paused ? "play.fill" : "pause.fill")
+                        }
+
+                        Button {
+                            Task { await vm.reannounce(hash: hash) }
+                        } label: {
+                            Label("Reannounce", systemImage: "arrow.clockwise")
+                        }
+
+                        Menu {
+                            Button("Remove torrent (keep files)") {
+                                Task { await vm.remove(hash: hash, deleteFiles: false) }
+                            }
+                            Button("Remove torrent and delete files", role: .destructive) {
+                                Task { await vm.remove(hash: hash, deleteFiles: true) }
+                            }
+                        } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                    }
+
+                    Spacer()
+                    Text("\(vm.torrents.count) total")
                         .font(.caption)
-                        .foregroundStyle(t.paused ? .orange : .primary)
-                }.width(min: 70, ideal: 90)
-                TableColumn("↓") { t in
-                    Text(formatRate(t.downloadRate)).monospacedDigit().font(.caption)
-                }.width(min: 70, ideal: 80)
-                TableColumn("↑") { t in
-                    Text(formatRate(t.uploadRate)).monospacedDigit().font(.caption)
-                }.width(min: 70, ideal: 80)
-                TableColumn("Peers") { t in
-                    Text("\(t.numPeers)").monospacedDigit().font(.caption)
-                }.width(min: 50, ideal: 60)
-                TableColumn("Ratio") { t in
-                    Text(String(format: "%.2f", t.ratio)).monospacedDigit().font(.caption)
-                }.width(min: 55, ideal: 65)
-                TableColumn("Category") { t in
-                    Text(t.category ?? "—").font(.caption).foregroundStyle(.secondary)
-                }.width(min: 80, ideal: 100)
-            }
-
-            Divider()
-            HStack(spacing: 8) {
-                Button {
-                    magnetURI = ""
-                    addCategory = ""
-                    addError = nil
-                    addOpen = true
-                } label: {
-                    Label("Add Magnet", systemImage: "plus")
+                        .foregroundStyle(.secondary)
                 }
-
-                if let hash = selectedHash, let t = vm.torrents.first(where: { $0.infoHash == hash }) {
-                    Button {
-                        Task { t.paused ? await vm.resume(hash: hash) : await vm.pause(hash: hash) }
-                    } label: {
-                        Label(t.paused ? "Resume" : "Pause", systemImage: t.paused ? "play.fill" : "pause.fill")
-                    }
-
-                    Button {
-                        Task { await vm.reannounce(hash: hash) }
-                    } label: {
-                        Label("Reannounce", systemImage: "arrow.clockwise")
-                    }
-
-                    Menu {
-                        Button("Remove torrent (keep files)") {
-                            Task { await vm.remove(hash: hash, deleteFiles: false) }
-                        }
-                        Button("Remove torrent and delete files", role: .destructive) {
-                            Task { await vm.remove(hash: hash, deleteFiles: true) }
-                        }
-                    } label: {
-                        Label("Remove", systemImage: "trash")
-                    }
-                }
-
-                Spacer()
-                Text("\(vm.torrents.count) total")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .padding(8)
             }
-            .padding(8)
+            .frame(minHeight: 200)
+
+            // Detail pane — files / trackers / peers
+            if let hash = selectedHash,
+               vm.torrents.contains(where: { $0.infoHash == hash }) {
+                TorrentDetailPane(vm: vm, hash: hash)
+                    .frame(minHeight: 180, idealHeight: 260)
+            }
         }
         .sheet(isPresented: $addOpen) {
             addMagnetSheet
@@ -265,6 +275,169 @@ struct TorrentsView: View {
             }
         }
         .padding(18)
+    }
+}
+
+// MARK: - Torrent detail pane (Files / Trackers / Peers)
+
+enum DetailTab: String, CaseIterable, Identifiable {
+    case files, trackers, peers
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+struct TorrentDetailPane: View {
+    @Bindable var vm: RuntimeViewModel
+    let hash: String
+    @State private var tab: DetailTab = .files
+    @State private var files: [FileInfo] = []
+    @State private var trackerList: [TrackerInfo] = []
+    @State private var peerList: [PeerInfo] = []
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Detail", selection: $tab) {
+                ForEach(DetailTab.allCases) { t in
+                    Text(t.title).tag(t)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 8)
+            .padding(.top, 6)
+
+            switch tab {
+            case .files:    filesTable
+            case .trackers: trackersTable
+            case .peers:    peersTable
+            }
+        }
+        .task(id: hash) { await loadAll() }
+        .task(id: tab)  { await loadAll() }
+    }
+
+    private func loadAll() async {
+        files = await vm.fileInfo(for: hash)
+        trackerList = await vm.trackers(for: hash)
+        peerList = await vm.peers(for: hash)
+    }
+
+    private var filesTable: some View {
+        VStack(spacing: 0) {
+            if files.isEmpty {
+                Text("Waiting for metadata…")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Table(files) {
+                    TableColumn("File") { f in
+                        Text(f.name).lineLimit(1).truncationMode(.middle).font(.caption)
+                    }
+                    TableColumn("Size") { f in
+                        Text(formatBytes(f.size)).monospacedDigit().font(.caption)
+                    }.width(min: 80, ideal: 90)
+                    TableColumn("Priority") { f in
+                        Text(priorityLabel(f.priority))
+                            .font(.caption)
+                            .foregroundStyle(f.priority == 0 ? .red : .primary)
+                    }.width(min: 90, ideal: 110)
+                    TableColumn("") { f in
+                        Button(f.priority == 0 ? "Enable" : "Skip") {
+                            Task { await toggleFile(f) }
+                        }
+                        .font(.caption)
+                    }.width(min: 60, ideal: 70)
+                }
+            }
+        }
+    }
+
+    private func priorityLabel(_ p: Int) -> String {
+        switch p {
+        case 0: return "Skip"
+        case 1: return "Normal"
+        case 4: return "Normal"
+        case 7: return "High"
+        default: return "Prio \(p)"
+        }
+    }
+
+    private func toggleFile(_ f: FileInfo) async {
+        var priorities = files.map(\.priority)
+        priorities[f.index] = (f.priority == 0) ? 4 : 0
+        _ = await vm.setFilePriorities(priorities, for: hash)
+        files = await vm.fileInfo(for: hash)
+    }
+
+    private var trackersTable: some View {
+        Group {
+            if trackerList.isEmpty {
+                Text("No trackers")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Table(trackerList) {
+                    TableColumn("URL") { t in
+                        Text(t.url).lineLimit(1).truncationMode(.middle).font(.caption)
+                    }
+                    TableColumn("Status") { t in
+                        Text(trackerStatus(t.status))
+                            .font(.caption)
+                            .foregroundStyle(t.status == 4 ? .red : t.status == 2 ? .green : .secondary)
+                    }.width(min: 90, ideal: 110)
+                    TableColumn("Seeds") { t in
+                        Text("\(t.numSeeds)").monospacedDigit().font(.caption)
+                    }.width(min: 50, ideal: 60)
+                    TableColumn("Peers") { t in
+                        Text("\(t.numPeers)").monospacedDigit().font(.caption)
+                    }.width(min: 50, ideal: 60)
+                    TableColumn("Message") { t in
+                        Text(t.message).lineLimit(1).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func trackerStatus(_ s: Int) -> String {
+        switch s {
+        case 0: return "Disabled"
+        case 1: return "Not contacted"
+        case 2: return "Working"
+        case 3: return "Updating"
+        case 4: return "Error"
+        default: return "Unknown"
+        }
+    }
+
+    private var peersTable: some View {
+        Group {
+            if peerList.isEmpty {
+                Text("No peers connected")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Table(peerList) {
+                    TableColumn("IP") { p in
+                        Text(p.ip).font(.caption.monospaced())
+                    }.width(min: 120, ideal: 140)
+                    TableColumn("Client") { p in
+                        Text(p.client).lineLimit(1).font(.caption)
+                    }.width(min: 140, ideal: 180)
+                    TableColumn("Progress") { p in
+                        Text(String(format: "%.0f%%", p.progress * 100)).monospacedDigit().font(.caption)
+                    }.width(min: 60, ideal: 70)
+                    TableColumn("↓") { p in
+                        Text(formatRate(p.downloadRate)).monospacedDigit().font(.caption)
+                    }.width(min: 70, ideal: 80)
+                    TableColumn("↑") { p in
+                        Text(formatRate(p.uploadRate)).monospacedDigit().font(.caption)
+                    }.width(min: 70, ideal: 80)
+                    TableColumn("Flags") { p in
+                        Text(p.flags).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    }.width(min: 60, ideal: 70)
+                }
+            }
+        }
     }
 }
 

@@ -84,6 +84,91 @@ public struct SessionStats: Sendable, Codable {
     }
 }
 
+public struct TrackerInfo: Sendable, Identifiable, Codable {
+    public var id: String { url }
+    public let url: String
+    public let tier: Int
+    public let numPeers: Int
+    public let numSeeds: Int
+    public let numLeechers: Int
+    public let numDownloaded: Int
+    public let message: String
+    public let status: Int // 0=disabled, 1=not_contacted, 2=working, 3=updating, 4=error
+
+    public init(
+        url: String,
+        tier: Int,
+        numPeers: Int,
+        numSeeds: Int,
+        numLeechers: Int,
+        numDownloaded: Int,
+        message: String,
+        status: Int
+    ) {
+        self.url = url
+        self.tier = tier
+        self.numPeers = numPeers
+        self.numSeeds = numSeeds
+        self.numLeechers = numLeechers
+        self.numDownloaded = numDownloaded
+        self.message = message
+        self.status = status
+    }
+}
+
+public struct PeerInfo: Sendable, Identifiable, Codable {
+    public var id: String { "\(ip):\(port)" }
+    public let ip: String
+    public let port: Int
+    public let client: String
+    public let progress: Float
+    public let downloadRate: Int64
+    public let uploadRate: Int64
+    public let totalDownload: Int64
+    public let totalUpload: Int64
+    public let flags: String
+    public let country: String
+
+    public init(
+        ip: String,
+        port: Int,
+        client: String,
+        progress: Float,
+        downloadRate: Int64,
+        uploadRate: Int64,
+        totalDownload: Int64,
+        totalUpload: Int64,
+        flags: String,
+        country: String
+    ) {
+        self.ip = ip
+        self.port = port
+        self.client = client
+        self.progress = progress
+        self.downloadRate = downloadRate
+        self.uploadRate = uploadRate
+        self.totalDownload = totalDownload
+        self.totalUpload = totalUpload
+        self.flags = flags
+        self.country = country
+    }
+}
+
+public struct FileInfo: Sendable, Identifiable, Codable {
+    public var id: Int { index }
+    public let index: Int
+    public let name: String
+    public let size: Int64
+    public let priority: Int
+
+    public init(index: Int, name: String, size: Int64, priority: Int) {
+        self.index = index
+        self.name = name
+        self.size = size
+        self.priority = priority
+    }
+}
+
 public enum TorrentEngineError: Error, LocalizedError {
     case addFailed(String)
     case notFound(String)
@@ -243,6 +328,55 @@ public actor TorrentEngine {
         session.reannounceTorrent(infoHash)
     }
 
+    /// Return the list of trackers for a torrent.
+    public func trackers(for infoHash: String) -> [TrackerInfo]? {
+        guard let raw = session.trackers(forInfoHash: infoHash) else { return nil }
+        return raw.map { t in
+            TrackerInfo(
+                url: t.url,
+                tier: Int(t.tier),
+                numPeers: Int(t.numPeers),
+                numSeeds: Int(t.numSeeds),
+                numLeechers: Int(t.numLeechers),
+                numDownloaded: Int(t.numDownloaded),
+                message: t.message,
+                status: Int(t.status)
+            )
+        }
+    }
+
+    /// Return the list of connected peers for a torrent.
+    public func peers(for infoHash: String) -> [PeerInfo]? {
+        guard let raw = session.peers(forInfoHash: infoHash) else { return nil }
+        return raw.map { p in
+            PeerInfo(
+                ip: p.ip,
+                port: Int(p.port),
+                client: p.client,
+                progress: p.progress,
+                downloadRate: p.downloadRate,
+                uploadRate: p.uploadRate,
+                totalDownload: p.totalDownload,
+                totalUpload: p.totalUpload,
+                flags: p.flags,
+                country: p.country
+            )
+        }
+    }
+
+    /// Return per-file info (name, size, priority) for a torrent.
+    public func fileInfo(for infoHash: String) -> [FileInfo]? {
+        guard let raw = session.fileInfo(forInfoHash: infoHash) else { return nil }
+        return raw.enumerated().map { (idx, dict) in
+            FileInfo(
+                index: idx,
+                name: dict["name"] as? String ?? "",
+                size: (dict["size"] as? NSNumber)?.int64Value ?? 0,
+                priority: (dict["priority"] as? NSNumber)?.intValue ?? 4
+            )
+        }
+    }
+
     /// Walk current torrents and, for any whose metadata has arrived and
     /// whose category has blocked extensions, apply file priorities to
     /// skip the blocked files. Idempotent — each hash is only processed
@@ -326,6 +460,11 @@ public actor TorrentEngine {
     public func setListenPort(_ port: UInt16) {
         self.listenPort = port
         session.setListenPort(port)
+    }
+
+    /// Set global download/upload rate limits. 0 = unlimited.
+    public func setRateLimits(downloadKBps: Int?, uploadKBps: Int?) {
+        session.setRateLimitsDownloadKBps(Int32(downloadKBps ?? 0), uploadKBps: Int32(uploadKBps ?? 0))
     }
 
     public func forceReannounceAll() {

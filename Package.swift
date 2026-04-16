@@ -113,6 +113,13 @@ let package = Package(
             dependencies: ["TorrentEngine"],
             path: "Sources/ControllarrPoC"
         ),
+
+        // MARK: - Tests
+        .testTarget(
+            name: "ControllarrTests",
+            dependencies: ["Persistence", "Services", "TorrentEngine"],
+            path: "Tests/ControllarrTests"
+        ),
     ],
     cxxLanguageStandard: .cxx17
 )

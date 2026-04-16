@@ -20,6 +20,8 @@
 #include <libtorrent/write_resume_data.hpp>
 #include <libtorrent/bencode.hpp>
 #include <libtorrent/session_stats.hpp>
+#include <libtorrent/peer_info.hpp>
+#include <libtorrent/announce_entry.hpp>
 
 #include <memory>
 #include <string>
@@ -62,6 +64,32 @@
 @property (nonatomic, readwrite) uint16_t listenPort;
 @end
 @implementation CTRLSessionStats @end
+
+@interface CTRLTrackerInfo ()
+@property (nonatomic, readwrite, copy) NSString *url;
+@property (nonatomic, readwrite) int tier;
+@property (nonatomic, readwrite) int numPeers;
+@property (nonatomic, readwrite) int numSeeds;
+@property (nonatomic, readwrite) int numLeechers;
+@property (nonatomic, readwrite) int numDownloaded;
+@property (nonatomic, readwrite, copy) NSString *message;
+@property (nonatomic, readwrite) NSInteger status;
+@end
+@implementation CTRLTrackerInfo @end
+
+@interface CTRLPeerInfo ()
+@property (nonatomic, readwrite, copy) NSString *ip;
+@property (nonatomic, readwrite) int port;
+@property (nonatomic, readwrite, copy) NSString *client;
+@property (nonatomic, readwrite) float progress;
+@property (nonatomic, readwrite) int64_t downloadRate;
+@property (nonatomic, readwrite) int64_t uploadRate;
+@property (nonatomic, readwrite) int64_t totalDownload;
+@property (nonatomic, readwrite) int64_t totalUpload;
+@property (nonatomic, readwrite, copy) NSString *flags;
+@property (nonatomic, readwrite, copy) NSString *country;
+@end
+@implementation CTRLPeerInfo @end
 
 // MARK: - Helpers
 
@@ -303,6 +331,159 @@ static NSString *ctrl_build_listen_interfaces(uint16_t port, BOOL bindAll) {
     return YES;
 }
 
+- (NSArray<CTRLTrackerInfo *> *)trackersForInfoHash:(NSString *)infoHash {
+    auto h = [self handleFor:infoHash];
+    if (!h.is_valid()) return nil;
+
+    std::vector<lt::announce_entry> trackers = h.trackers();
+    NSMutableArray<CTRLTrackerInfo *> *out = [NSMutableArray arrayWithCapacity:trackers.size()];
+
+    for (auto const &entry : trackers) {
+        CTRLTrackerInfo *t = [CTRLTrackerInfo new];
+        t.url  = ctrl_nsstring(entry.url);
+        t.tier = entry.tier;
+
+        // Scrape data and status live in the first endpoint's V1 info_hash entry.
+        int numPeers = 0, numSeeds = 0, numLeechers = 0, numDownloaded = 0;
+        NSString *message = @"";
+        NSInteger status = 1; // default: not_contacted
+
+        if (!entry.endpoints.empty()) {
+            auto const &ep = entry.endpoints[0];
+            auto const &aih = ep.info_hashes[lt::protocol_version::V1];
+            numPeers      = aih.scrape_incomplete + aih.scrape_complete;
+            numSeeds      = aih.scrape_complete;
+            numLeechers   = aih.scrape_incomplete;
+            numDownloaded = aih.scrape_downloaded;
+            message       = ctrl_nsstring(aih.message);
+
+            // Status mapping:
+            // if fails > 0 -> 4 (error)
+            // if updating  -> 3 (updating)
+            // if we got a response (complete_sent is true or scrape data exists) -> 2 (working)
+            // else -> 1 (not_contacted)
+            if (aih.fails > 0) {
+                status = 4; // error
+            } else if (aih.updating) {
+                status = 3; // updating
+            } else if (aih.scrape_complete >= 0 || aih.scrape_incomplete >= 0 || !aih.message.empty()) {
+                status = 2; // working
+            }
+        }
+
+        t.numPeers      = numPeers;
+        t.numSeeds       = numSeeds;
+        t.numLeechers    = numLeechers;
+        t.numDownloaded  = numDownloaded;
+        t.message        = message;
+        t.status         = status;
+
+        [out addObject:t];
+    }
+    return out;
+}
+
+- (NSArray<CTRLPeerInfo *> *)peersForInfoHash:(NSString *)infoHash {
+    auto h = [self handleFor:infoHash];
+    if (!h.is_valid()) return nil;
+
+    std::vector<lt::peer_info> peers;
+    h.get_peer_info(peers);
+
+    NSMutableArray<CTRLPeerInfo *> *out = [NSMutableArray arrayWithCapacity:peers.size()];
+
+    for (auto const &p : peers) {
+        CTRLPeerInfo *pi = [CTRLPeerInfo new];
+        pi.ip            = ctrl_nsstring(p.ip.address().to_string());
+        pi.port          = p.ip.port();
+        pi.client        = ctrl_nsstring(p.client);
+        pi.progress      = p.progress;
+        pi.downloadRate  = p.down_speed;
+        pi.uploadRate    = p.up_speed;
+        pi.totalDownload = p.total_download;
+        pi.totalUpload   = p.total_upload;
+
+        // Build flags string using qBittorrent conventions:
+        // D = interested(local) and not choked(peer), i.e. downloading piece
+        // d = interested(local)
+        // U = interested(remote) and not choked(local), i.e. uploading
+        // u = interested(remote)
+        // O = optimistic unchoke
+        // S = peer is snubbed
+        // I = incoming connection
+        // E = encrypted
+        // H = seed/upload only
+        // X = peer from PEX
+        // P = peer from uTP
+        // L = peer from LSD
+        NSMutableString *flags = [NSMutableString string];
+
+        if (p.flags & lt::peer_info::interesting) {
+            if (!(p.flags & lt::peer_info::remote_choked))
+                [flags appendString:@"D"];
+            else
+                [flags appendString:@"d"];
+        }
+        if (p.flags & lt::peer_info::remote_interested) {
+            if (!(p.flags & lt::peer_info::choked))
+                [flags appendString:@"U"];
+            else
+                [flags appendString:@"u"];
+        }
+        if (p.flags & lt::peer_info::optimistic_unchoke)
+            [flags appendString:@"O"];
+        if (p.flags & lt::peer_info::snubbed)
+            [flags appendString:@"S"];
+        if (!(p.flags & lt::peer_info::local_connection))
+            [flags appendString:@"I"];
+#ifndef TORRENT_DISABLE_ENCRYPTION
+        if (p.flags & lt::peer_info::rc4_encrypted)
+            [flags appendString:@"E"];
+#endif
+        if (p.flags & lt::peer_info::seed)
+            [flags appendString:@"H"];
+        if (p.source & lt::peer_info::pex)
+            [flags appendString:@"X"];
+        if (p.flags & lt::peer_info::utp_socket)
+            [flags appendString:@"P"];
+        if (p.source & lt::peer_info::lsd)
+            [flags appendString:@"L"];
+
+        pi.flags = flags;
+
+        // Country: libtorrent's peer_info no longer has a `country` field
+        // (it was removed in libtorrent 2.x). Set to empty string.
+        pi.country = @"";
+
+        [out addObject:pi];
+    }
+    return out;
+}
+
+- (NSArray<NSDictionary *> *)fileInfoForInfoHash:(NSString *)infoHash {
+    auto h = [self handleFor:infoHash];
+    if (!h.is_valid()) return nil;
+
+    std::shared_ptr<const lt::torrent_info> ti = h.torrent_file();
+    if (!ti) return nil; // metadata not yet available
+
+    auto const &fs = ti->files();
+    std::vector<lt::download_priority_t> prios = h.get_file_priorities();
+    int nfiles = fs.num_files();
+
+    NSMutableArray<NSDictionary *> *out = [NSMutableArray arrayWithCapacity:nfiles];
+    for (lt::file_index_t i{0}; i < fs.end_file(); ++i) {
+        int idx = static_cast<int>(i);
+        int prio = (idx < (int)prios.size()) ? static_cast<int>(prios[idx]) : 4;
+        [out addObject:@{
+            @"name":     ctrl_nsstring(fs.file_path(i)),
+            @"size":     @(fs.file_size(i)),
+            @"priority": @(prio)
+        }];
+    }
+    return out;
+}
+
 // MARK: Reading
 
 static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
@@ -396,6 +577,14 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
                  ctrl_build_listen_interfaces(port, _bindAll).UTF8String);
     _session->apply_settings(std::move(pack));
     NSLog(@"[Controllarr] listen port -> %u", port);
+}
+
+- (void)setRateLimitsDownloadKBps:(int)downKBps uploadKBps:(int)upKBps {
+    lt::settings_pack pack;
+    // 0 = unlimited in libtorrent
+    pack.set_int(lt::settings_pack::download_rate_limit, downKBps > 0 ? downKBps * 1024 : 0);
+    pack.set_int(lt::settings_pack::upload_rate_limit,   upKBps > 0   ? upKBps * 1024   : 0);
+    _session->apply_settings(std::move(pack));
 }
 
 - (void)forceReannounceAll {

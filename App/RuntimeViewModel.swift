@@ -173,6 +173,28 @@ final class RuntimeViewModel {
         let url = URL(string: "http://\(settings.webUIHost):\(settings.webUIPort)/")
         if let url { NSWorkspace.shared.open(url) }
     }
+
+    // MARK: - Per-torrent detail
+
+    func fileInfo(for hash: String) async -> [FileInfo] {
+        guard let runtime else { return [] }
+        return await runtime.engine.fileInfo(for: hash) ?? []
+    }
+
+    func setFilePriorities(_ priorities: [Int], for hash: String) async -> Bool {
+        guard let runtime else { return false }
+        return await runtime.engine.setFilePriorities(priorities, for: hash)
+    }
+
+    func trackers(for hash: String) async -> [TrackerInfo] {
+        guard let runtime else { return [] }
+        return await runtime.engine.trackers(for: hash) ?? []
+    }
+
+    func peers(for hash: String) async -> [PeerInfo] {
+        guard let runtime else { return [] }
+        return await runtime.engine.peers(for: hash) ?? []
+    }
 }
 
 extension SessionStats {

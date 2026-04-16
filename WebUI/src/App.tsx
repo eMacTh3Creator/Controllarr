@@ -1,6 +1,11 @@
 import { startTransition, useCallback, useDeferredValue, useEffect, useState, type FormEvent } from 'react'
 import {
   api,
+  fetchFiles,
+  fetchTrackers,
+  fetchPeers,
+  setFilePriorities,
+  type BandwidthScheduleRule,
   type Category,
   type HealthIssue,
   type LogEntry,
@@ -558,6 +563,8 @@ function StatsGrid({
   )
 }
 
+type DetailSubTab = 'files' | 'trackers' | 'peers'
+
 function TorrentsTab({
   torrents,
   categories,
@@ -581,6 +588,71 @@ function TorrentsTab({
   onResume: (hash: string) => void
   onRemove: (hash: string, deleteFiles: boolean) => void
 }) {
+  const [selectedHash, setSelectedHash] = useState<string | null>(null)
+  const [detailTab, setDetailTab] = useState<DetailSubTab>('files')
+  const [files, setFiles] = useState<any[]>([])
+  const [trackers, setTrackers] = useState<any[]>([])
+  const [peers, setPeers] = useState<any[]>([])
+
+  const selectedTorrent = torrents.find((t) => t.hash === selectedHash) ?? null
+
+  useEffect(() => {
+    if (!selectedHash) return
+    let cancelled = false
+
+    async function load() {
+      try {
+        const [f, t, p] = await Promise.all([
+          fetchFiles(selectedHash!),
+          fetchTrackers(selectedHash!),
+          fetchPeers(selectedHash!),
+        ])
+        if (!cancelled) {
+          setFiles(f)
+          setTrackers(t)
+          setPeers(p)
+        }
+      } catch {
+        // silently ignore — detail panel is best-effort
+      }
+    }
+
+    void load()
+    const interval = window.setInterval(load, 3_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [selectedHash])
+
+  function handleRowClick(hash: string) {
+    if (selectedHash === hash) {
+      setSelectedHash(null)
+    } else {
+      setSelectedHash(hash)
+      setDetailTab('files')
+      setFiles([])
+      setTrackers([])
+      setPeers([])
+    }
+  }
+
+  async function handleToggleFilePriority(index: number) {
+    if (!selectedHash) return
+    const updated = files.map((f, i) => {
+      if (i === index) return { ...f, priority: f.priority === 0 ? 4 : 0 }
+      return f
+    })
+    setFiles(updated)
+    const priorities = updated.map((f: any) => f.priority as number)
+    const ok = await setFilePriorities(selectedHash, priorities)
+    if (!ok) {
+      // revert on failure
+      const fresh = await fetchFiles(selectedHash)
+      setFiles(fresh)
+    }
+  }
+
   return (
     <div className="section-stack">
       <header className="section-header">
@@ -634,86 +706,226 @@ function TorrentsTab({
           body="Add a magnet above or point your *arr apps at Controllarr's qBittorrent-compatible API."
         />
       ) : (
-        <div className="table-shell">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Category</th>
-                <th>Progress</th>
-                <th>Transfer</th>
-                <th>Peers</th>
-                <th>Ratio</th>
-                <th>ETA</th>
-                <th>State</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {torrents.map((torrent) => {
-                const paused = torrent.state.startsWith('paused')
-                const seeding = torrent.state === 'uploading' || torrent.state === 'stalledUP'
+        <>
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Category</th>
+                  <th>Progress</th>
+                  <th>Transfer</th>
+                  <th>Peers</th>
+                  <th>Ratio</th>
+                  <th>ETA</th>
+                  <th>State</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {torrents.map((torrent) => {
+                  const paused = torrent.state.startsWith('paused')
+                  const seeding = torrent.state === 'uploading' || torrent.state === 'stalledUP'
+                  const isSelected = torrent.hash === selectedHash
 
-                return (
-                  <tr key={torrent.hash}>
-                    <td>
-                      <div className="primary-cell">{torrent.name || '(fetching metadata…)'} </div>
-                      <div className="subtle-cell">{torrent.save_path || 'Save path pending'}</div>
-                    </td>
-                    <td>{torrent.category || 'Unassigned'}</td>
-                    <td className="progress-cell">
-                      <div className="progress-track">
-                        <div
-                          className={seeding ? 'progress-fill success' : paused ? 'progress-fill muted' : 'progress-fill'}
-                          style={{ width: `${Math.min(100, torrent.progress * 100)}%` }}
-                        />
-                      </div>
-                      <div className="subtle-cell">
-                        {fmtPercent(torrent.progress)} · {fmtBytes(torrent.completed)} / {fmtBytes(torrent.size)}
-                      </div>
-                    </td>
-                    <td className="mono-cell">
-                      ↓ {fmtRate(torrent.dlspeed)}
-                      <br />
-                      ↑ {fmtRate(torrent.upspeed)}
-                    </td>
-                    <td className="mono-cell">
-                      {torrent.num_seeds}S / {torrent.num_leechs}L
-                    </td>
-                    <td className="mono-cell">{torrent.ratio.toFixed(2)}</td>
-                    <td>{fmtETA(torrent.eta)}</td>
-                    <td>
-                      <span className={`pill ${stateTone(torrent.state)}`}>{torrent.state}</span>
-                    </td>
-                    <td>
-                      <div className="action-cluster">
-                        {paused ? (
-                          <button type="button" onClick={() => onResume(torrent.hash)}>
-                            Resume
+                  return (
+                    <tr
+                      key={torrent.hash}
+                      style={isSelected ? { background: 'rgba(97, 199, 255, 0.08)', cursor: 'pointer' } : { cursor: 'pointer' }}
+                      onClick={() => handleRowClick(torrent.hash)}
+                    >
+                      <td>
+                        <div className="primary-cell">{torrent.name || '(fetching metadata…)'} </div>
+                        <div className="subtle-cell">{torrent.save_path || 'Save path pending'}</div>
+                      </td>
+                      <td>{torrent.category || 'Unassigned'}</td>
+                      <td className="progress-cell">
+                        <div className="progress-track">
+                          <div
+                            className={seeding ? 'progress-fill success' : paused ? 'progress-fill muted' : 'progress-fill'}
+                            style={{ width: `${Math.min(100, torrent.progress * 100)}%` }}
+                          />
+                        </div>
+                        <div className="subtle-cell">
+                          {fmtPercent(torrent.progress)} · {fmtBytes(torrent.completed)} / {fmtBytes(torrent.size)}
+                        </div>
+                      </td>
+                      <td className="mono-cell">
+                        ↓ {fmtRate(torrent.dlspeed)}
+                        <br />
+                        ↑ {fmtRate(torrent.upspeed)}
+                      </td>
+                      <td className="mono-cell">
+                        {torrent.num_seeds}S / {torrent.num_leechs}L
+                      </td>
+                      <td className="mono-cell">{torrent.ratio.toFixed(2)}</td>
+                      <td>{fmtETA(torrent.eta)}</td>
+                      <td>
+                        <span className={`pill ${stateTone(torrent.state)}`}>{torrent.state}</span>
+                      </td>
+                      <td>
+                        <div className="action-cluster" onClick={(e) => e.stopPropagation()}>
+                          {paused ? (
+                            <button type="button" onClick={() => onResume(torrent.hash)}>
+                              Resume
+                            </button>
+                          ) : (
+                            <button type="button" onClick={() => onPause(torrent.hash)}>
+                              Pause
+                            </button>
+                          )}
+                          <button type="button" onClick={() => onRemove(torrent.hash, false)}>
+                            Remove
                           </button>
-                        ) : (
-                          <button type="button" onClick={() => onPause(torrent.hash)}>
-                            Pause
+                          <button
+                            type="button"
+                            className="danger"
+                            onClick={() => onRemove(torrent.hash, true)}
+                          >
+                            Delete files
                           </button>
-                        )}
-                        <button type="button" onClick={() => onRemove(torrent.hash, false)}>
-                          Remove
-                        </button>
-                        <button
-                          type="button"
-                          className="danger"
-                          onClick={() => onRemove(torrent.hash, true)}
-                        >
-                          Delete files
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {selectedTorrent && (
+            <div className="form-panel" style={{ marginTop: '8px' }}>
+              <div className="form-panel-header">
+                <h3>{selectedTorrent.name || '(fetching metadata…)'}</h3>
+                <p>Inspect files, trackers, and peers for this torrent.</p>
+              </div>
+
+              <div className="button-row" style={{ marginBottom: '4px' }}>
+                {(['files', 'trackers', 'peers'] as DetailSubTab[]).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    className={detailTab === tab ? 'primary' : undefined}
+                    onClick={() => setDetailTab(tab)}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              {detailTab === 'files' && (
+                files.length === 0 ? (
+                  <EmptyState title="No file data" body="Waiting for metadata or the torrent has no files listed yet." />
+                ) : (
+                  <div className="table-shell">
+                    <table className="data-table" style={{ minWidth: '600px' }}>
+                      <thead>
+                        <tr>
+                          <th>Name</th>
+                          <th>Size</th>
+                          <th>Priority</th>
+                          <th>Toggle</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {files.map((file: any, idx: number) => (
+                          <tr key={idx}>
+                            <td className="primary-cell">{file.name ?? `File ${idx}`}</td>
+                            <td className="mono-cell">{fmtBytes(file.size ?? 0)}</td>
+                            <td>
+                              <span className={`pill ${file.priority === 0 ? 'neutral' : 'blue'}`}>
+                                {file.priority === 0 ? 'Skipped' : `Priority ${file.priority}`}
+                              </span>
+                            </td>
+                            <td>
+                              <button type="button" onClick={() => void handleToggleFilePriority(idx)}>
+                                {file.priority === 0 ? 'Enable' : 'Skip'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )
-              })}
-            </tbody>
-          </table>
-        </div>
+              )}
+
+              {detailTab === 'trackers' && (
+                trackers.length === 0 ? (
+                  <EmptyState title="No tracker data" body="Waiting for tracker information." />
+                ) : (
+                  <div className="table-shell">
+                    <table className="data-table" style={{ minWidth: '800px' }}>
+                      <thead>
+                        <tr>
+                          <th>URL</th>
+                          <th>Status</th>
+                          <th>Tier</th>
+                          <th>Seeds</th>
+                          <th>Peers</th>
+                          <th>Leechers</th>
+                          <th>Message</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {trackers.map((tracker: any, idx: number) => {
+                          const statusText = trackerStatusText(tracker.status)
+                          const statusTone = trackerStatusTone(tracker.status)
+                          return (
+                            <tr key={idx}>
+                              <td className="primary-cell" style={{ wordBreak: 'break-all' }}>{tracker.url ?? '—'}</td>
+                              <td>
+                                <span className={`pill ${statusTone}`}>{statusText}</span>
+                              </td>
+                              <td className="mono-cell">{tracker.tier ?? '—'}</td>
+                              <td className="mono-cell">{tracker.seeds ?? tracker.num_seeds ?? '—'}</td>
+                              <td className="mono-cell">{tracker.peers ?? tracker.num_peers ?? '—'}</td>
+                              <td className="mono-cell">{tracker.leechers ?? tracker.num_leechers ?? '—'}</td>
+                              <td>{tracker.message || tracker.msg || '—'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              )}
+
+              {detailTab === 'peers' && (
+                peers.length === 0 ? (
+                  <EmptyState title="No peer data" body="No peers connected to this torrent right now." />
+                ) : (
+                  <div className="table-shell">
+                    <table className="data-table" style={{ minWidth: '700px' }}>
+                      <thead>
+                        <tr>
+                          <th>IP</th>
+                          <th>Client</th>
+                          <th>Progress</th>
+                          <th>Download rate</th>
+                          <th>Upload rate</th>
+                          <th>Flags</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {peers.map((peer: any, idx: number) => (
+                          <tr key={idx}>
+                            <td className="mono-cell">{peer.ip ?? '—'}</td>
+                            <td>{peer.client ?? '—'}</td>
+                            <td className="mono-cell">{fmtPercent(peer.progress ?? 0)}</td>
+                            <td className="mono-cell">{fmtRate(peer.dl_speed ?? peer.dlspeed ?? 0)}</td>
+                            <td className="mono-cell">{fmtRate(peer.up_speed ?? peer.upspeed ?? 0)}</td>
+                            <td className="mono-cell">{peer.flags ?? '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
@@ -1036,6 +1248,11 @@ function SettingsTab({
         </section>
       </div>
 
+      <BandwidthScheduleSection
+        rules={settings.bandwidthSchedule}
+        onChange={(rules) => patch({ bandwidthSchedule: rules })}
+      />
+
       <div className="button-row">
         <button className="primary" type="submit">
           Save settings
@@ -1045,6 +1262,189 @@ function SettingsTab({
         </button>
       </div>
     </form>
+  )
+}
+
+const DAY_LABELS: Record<number, string> = {
+  1: 'Sun', 2: 'Mon', 3: 'Tue', 4: 'Wed', 5: 'Thu', 6: 'Fri', 7: 'Sat',
+}
+
+function emptyScheduleRule(): BandwidthScheduleRule {
+  return {
+    name: '',
+    enabled: true,
+    daysOfWeek: [2, 3, 4, 5, 6],
+    startHour: 9,
+    startMinute: 0,
+    endHour: 17,
+    endMinute: 0,
+    maxDownloadKBps: 0,
+    maxUploadKBps: 0,
+  }
+}
+
+function BandwidthScheduleSection({
+  rules,
+  onChange,
+}: {
+  rules: BandwidthScheduleRule[]
+  onChange: (rules: BandwidthScheduleRule[]) => void
+}) {
+  function updateRule(index: number, updates: Partial<BandwidthScheduleRule>) {
+    const next = rules.map((rule, i) => (i === index ? { ...rule, ...updates } : rule))
+    onChange(next)
+  }
+
+  function addRule() {
+    onChange([...rules, emptyScheduleRule()])
+  }
+
+  function removeRule(index: number) {
+    onChange(rules.filter((_, i) => i !== index))
+  }
+
+  function toggleDay(index: number, day: number) {
+    const rule = rules[index]
+    const days = rule.daysOfWeek.includes(day)
+      ? rule.daysOfWeek.filter((d) => d !== day)
+      : [...rule.daysOfWeek, day].sort((a, b) => a - b)
+    updateRule(index, { daysOfWeek: days })
+  }
+
+  return (
+    <section className="form-panel">
+      <div className="form-panel-header">
+        <h3>Bandwidth Schedule</h3>
+        <p>Define time-based rules that limit download and upload speeds on specific days.</p>
+      </div>
+
+      {rules.length === 0 ? (
+        <EmptyState
+          title="No bandwidth rules"
+          body="Add a schedule rule to throttle speeds during specific windows."
+        />
+      ) : (
+        <div className="section-stack">
+          {rules.map((rule, idx) => (
+            <div
+              key={idx}
+              className="form-panel"
+              style={{ background: 'rgba(8, 20, 27, 0.55)' }}
+            >
+              <div className="form-grid">
+                <label className="field">
+                  <span>Rule name</span>
+                  <input
+                    value={rule.name}
+                    onChange={(e) => updateRule(idx, { name: e.target.value })}
+                    placeholder="e.g. Work hours"
+                  />
+                </label>
+
+                <label className="toggle-field">
+                  <span>Enabled</span>
+                  <input
+                    type="checkbox"
+                    checked={rule.enabled}
+                    onChange={(e) => updateRule(idx, { enabled: e.currentTarget.checked })}
+                  />
+                </label>
+
+                <div className="field wide">
+                  <span style={{ fontSize: '0.88rem', color: 'var(--muted)', marginBottom: '0.5rem', display: 'block' }}>
+                    Days of week
+                  </span>
+                  <div className="button-row">
+                    {([1, 2, 3, 4, 5, 6, 7] as number[]).map((day) => (
+                      <button
+                        key={day}
+                        type="button"
+                        className={rule.daysOfWeek.includes(day) ? 'primary' : undefined}
+                        style={{ minWidth: '3.2rem', padding: '0.5rem 0.6rem' }}
+                        onClick={() => toggleDay(idx, day)}
+                      >
+                        {DAY_LABELS[day]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <label className="field">
+                  <span>Start hour</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={rule.startHour}
+                    onChange={(e) => updateRule(idx, { startHour: readNumber(e.currentTarget.valueAsNumber, rule.startHour) })}
+                  />
+                </label>
+                <label className="field">
+                  <span>Start minute</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={59}
+                    value={rule.startMinute}
+                    onChange={(e) => updateRule(idx, { startMinute: readNumber(e.currentTarget.valueAsNumber, rule.startMinute) })}
+                  />
+                </label>
+                <label className="field">
+                  <span>End hour</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={rule.endHour}
+                    onChange={(e) => updateRule(idx, { endHour: readNumber(e.currentTarget.valueAsNumber, rule.endHour) })}
+                  />
+                </label>
+                <label className="field">
+                  <span>End minute</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={59}
+                    value={rule.endMinute}
+                    onChange={(e) => updateRule(idx, { endMinute: readNumber(e.currentTarget.valueAsNumber, rule.endMinute) })}
+                  />
+                </label>
+                <label className="field">
+                  <span>Max download (KB/s)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={rule.maxDownloadKBps}
+                    onChange={(e) => updateRule(idx, { maxDownloadKBps: readNumber(e.currentTarget.valueAsNumber, rule.maxDownloadKBps) })}
+                  />
+                </label>
+                <label className="field">
+                  <span>Max upload (KB/s)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={rule.maxUploadKBps}
+                    onChange={(e) => updateRule(idx, { maxUploadKBps: readNumber(e.currentTarget.valueAsNumber, rule.maxUploadKBps) })}
+                  />
+                </label>
+              </div>
+
+              <div className="button-row">
+                <button type="button" className="danger" onClick={() => removeRule(idx)}>
+                  Remove rule
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="button-row">
+        <button type="button" onClick={addRule}>
+          Add schedule rule
+        </button>
+      </div>
+    </section>
   )
 }
 
@@ -1516,6 +1916,7 @@ function normalizeSettings(settings: Settings): Settings {
     webUIPassword: settings.webUIPassword ?? '',
     globalMaxRatio: settings.globalMaxRatio ?? null,
     globalMaxSeedingTimeMinutes: settings.globalMaxSeedingTimeMinutes ?? null,
+    bandwidthSchedule: settings.bandwidthSchedule ?? [],
   }
 }
 
@@ -1537,6 +1938,25 @@ function statusPillClass(stats: SessionStats | null): string {
   if (stats.hasIncoming) return 'pill green'
   if (stats.numTorrents > 0) return 'pill amber'
   return 'pill neutral'
+}
+
+function trackerStatusText(status: number | undefined): string {
+  switch (status) {
+    case 0: return 'Disabled'
+    case 1: return 'Not contacted'
+    case 2: return 'Working'
+    case 3: return 'Updating'
+    case 4: return 'Error'
+    default: return 'Unknown'
+  }
+}
+
+function trackerStatusTone(status: number | undefined): string {
+  switch (status) {
+    case 2: return 'green'
+    case 4: return 'red'
+    default: return 'neutral'
+  }
 }
 
 function stateTone(state: string): string {

@@ -310,6 +310,127 @@ public enum QBittorrentAPI {
             return plainText("")
         }
 
+        // MARK: /torrents/files, trackers, pieceStates (qBit compat)
+
+        router.get("/api/v2/torrents/files") { request, _ -> Response in
+            let query = FormParser.parseQuery(request.uri.query ?? "")
+            guard let hash = query["hash"],
+                  let files = await services.engine.fileInfo(for: hash) else {
+                return Response(status: .notFound)
+            }
+            let out: [[String: Any]] = files.map { f in
+                [
+                    "index": f.index,
+                    "name": f.name,
+                    "size": f.size,
+                    "progress": f.priority == 0 ? 0.0 : 1.0,
+                    "priority": f.priority,
+                    "is_seed": false,
+                    "piece_range": [0, 0],
+                    "availability": -1,
+                ]
+            }
+            return json(out)
+        }
+        router.get("/api/v2/torrents/trackers") { request, _ -> Response in
+            let query = FormParser.parseQuery(request.uri.query ?? "")
+            guard let hash = query["hash"],
+                  let trackers = await services.engine.trackers(for: hash) else {
+                return Response(status: .notFound)
+            }
+            let out: [[String: Any]] = trackers.map { t in
+                [
+                    "url": t.url,
+                    "status": t.status,
+                    "tier": t.tier,
+                    "num_peers": t.numPeers,
+                    "num_seeds": t.numSeeds,
+                    "num_leeches": t.numLeechers,
+                    "num_downloaded": t.numDownloaded,
+                    "msg": t.message,
+                ]
+            }
+            return json(out)
+        }
+        router.get("/api/v2/torrents/pieceStates") { request, _ -> Response in
+            let query = FormParser.parseQuery(request.uri.query ?? "")
+            guard let _ = query["hash"] else {
+                return Response(status: .notFound)
+            }
+            return json([] as [Any])
+        }
+
+        // MARK: Controllarr: files, trackers, peers
+
+        router.get("/api/controllarr/torrents/:hash/files") { _, context -> Response in
+            guard let hash = context.parameters.get("hash"),
+                  let files = await services.engine.fileInfo(for: hash) else {
+                return Response(status: .notFound)
+            }
+            let out: [[String: Any]] = files.map { f in
+                [
+                    "index": f.index,
+                    "name": f.name,
+                    "size": f.size,
+                    "priority": f.priority,
+                ]
+            }
+            return json(out)
+        }
+        router.post("/api/controllarr/torrents/:hash/files") { request, context -> Response in
+            guard let hash = context.parameters.get("hash") else {
+                return Response(status: .badRequest)
+            }
+            let body = try await request.body.collect(upTo: 256 * 1024)
+            guard let dict = try? JSONSerialization.jsonObject(with: Data(buffer: body))
+                    as? [String: Any],
+                  let priorities = dict["priorities"] as? [Int] else {
+                return Response(status: .badRequest)
+            }
+            let ok = await services.engine.setFilePriorities(priorities, for: hash)
+            return ok ? plainText("Ok.") : Response(status: .conflict)
+        }
+        router.get("/api/controllarr/torrents/:hash/trackers") { _, context -> Response in
+            guard let hash = context.parameters.get("hash"),
+                  let trackers = await services.engine.trackers(for: hash) else {
+                return Response(status: .notFound)
+            }
+            let out: [[String: Any]] = trackers.map { t in
+                [
+                    "url": t.url,
+                    "tier": t.tier,
+                    "numPeers": t.numPeers,
+                    "numSeeds": t.numSeeds,
+                    "numLeechers": t.numLeechers,
+                    "numDownloaded": t.numDownloaded,
+                    "message": t.message,
+                    "status": t.status,
+                ]
+            }
+            return json(out)
+        }
+        router.get("/api/controllarr/torrents/:hash/peers") { _, context -> Response in
+            guard let hash = context.parameters.get("hash"),
+                  let peers = await services.engine.peers(for: hash) else {
+                return Response(status: .notFound)
+            }
+            let out: [[String: Any]] = peers.map { p in
+                [
+                    "ip": p.ip,
+                    "port": p.port,
+                    "client": p.client,
+                    "progress": p.progress,
+                    "downloadRate": p.downloadRate,
+                    "uploadRate": p.uploadRate,
+                    "totalDownload": p.totalDownload,
+                    "totalUpload": p.totalUpload,
+                    "flags": p.flags,
+                    "country": p.country,
+                ]
+            }
+            return json(out)
+        }
+
         // MARK: Controllarr-native endpoints
 
         router.get("/api/controllarr/stats") { _, _ -> Response in

@@ -44,6 +44,18 @@ export type Category = {
 
 export type SeedLimitAction = 'pause' | 'remove_keep_files' | 'remove_delete_files'
 
+export type BandwidthScheduleRule = {
+  name: string
+  enabled: boolean
+  daysOfWeek: number[]
+  startHour: number
+  startMinute: number
+  endHour: number
+  endMinute: number
+  maxDownloadKBps: number
+  maxUploadKBps: number
+}
+
 export type Settings = {
   listenPortRangeStart: number
   listenPortRangeEnd: number
@@ -59,6 +71,7 @@ export type Settings = {
   minimumSeedTimeMinutes: number
   healthStallMinutes: number
   healthReannounceOnStall: boolean
+  bandwidthSchedule: BandwidthScheduleRule[]
 }
 
 export type HealthReason =
@@ -139,6 +152,28 @@ async function sendJSON(path: string, body: unknown, method = 'POST'): Promise<v
   })
 }
 
+// Per-torrent detail
+export async function fetchFiles(hash: string): Promise<any[]> {
+  const r = await fetch(`/api/controllarr/torrents/${hash}/files`);
+  return r.ok ? r.json() : [];
+}
+export async function setFilePriorities(hash: string, priorities: number[]): Promise<boolean> {
+  const r = await fetch(`/api/controllarr/torrents/${hash}/files`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ priorities })
+  });
+  return r.ok;
+}
+export async function fetchTrackers(hash: string): Promise<any[]> {
+  const r = await fetch(`/api/controllarr/torrents/${hash}/trackers`);
+  return r.ok ? r.json() : [];
+}
+export async function fetchPeers(hash: string): Promise<any[]> {
+  const r = await fetch(`/api/controllarr/torrents/${hash}/peers`);
+  return r.ok ? r.json() : [];
+}
+
 export const api = {
   async login(username: string, password: string) {
     await form('/api/v2/auth/login', { username, password })
@@ -213,6 +248,7 @@ export const api = {
       minimumSeedTimeMinutes: response.minimumSeedTimeMinutes ?? 60,
       healthStallMinutes: response.healthStallMinutes ?? 30,
       healthReannounceOnStall: response.healthReannounceOnStall ?? true,
+      bandwidthSchedule: response.bandwidthSchedule ?? [],
     }
   },
 
@@ -222,6 +258,7 @@ export const api = {
       webUIPassword: settings.webUIPassword?.trim() ? settings.webUIPassword : undefined,
       globalMaxRatio: settings.globalMaxRatio,
       globalMaxSeedingTimeMinutes: settings.globalMaxSeedingTimeMinutes,
+      bandwidthSchedule: settings.bandwidthSchedule,
     })
   },
 

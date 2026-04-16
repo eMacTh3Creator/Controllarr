@@ -87,6 +87,45 @@ public struct Category: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+public struct BandwidthRule: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { name }
+    /// Human-readable label for this rule (e.g. "Weekday daytime").
+    public var name: String
+    public var enabled: Bool
+    /// Days of week this rule applies. 1=Sun, 2=Mon, …, 7=Sat.
+    public var daysOfWeek: [Int]
+    public var startHour: Int
+    public var startMinute: Int
+    public var endHour: Int
+    public var endMinute: Int
+    /// Max download speed in KiB/s. nil or 0 = unlimited.
+    public var maxDownloadKBps: Int?
+    /// Max upload speed in KiB/s. nil or 0 = unlimited.
+    public var maxUploadKBps: Int?
+
+    public init(
+        name: String,
+        enabled: Bool = true,
+        daysOfWeek: [Int] = [2, 3, 4, 5, 6],
+        startHour: Int = 8,
+        startMinute: Int = 0,
+        endHour: Int = 17,
+        endMinute: Int = 0,
+        maxDownloadKBps: Int? = nil,
+        maxUploadKBps: Int? = nil
+    ) {
+        self.name = name
+        self.enabled = enabled
+        self.daysOfWeek = daysOfWeek
+        self.startHour = startHour
+        self.startMinute = startMinute
+        self.endHour = endHour
+        self.endMinute = endMinute
+        self.maxDownloadKBps = maxDownloadKBps
+        self.maxUploadKBps = maxUploadKBps
+    }
+}
+
 public struct Settings: Codable, Sendable, Equatable {
     /// Inclusive range of ports the PortWatcher may pick from when
     /// reselecting. Inclusive on both ends.
@@ -126,6 +165,11 @@ public struct Settings: Codable, Sendable, Equatable {
     /// hope of picking up new peers.
     public var healthReannounceOnStall: Bool
 
+    // Bandwidth scheduler -------------------------------------------------------
+
+    /// Time-of-day bandwidth limit windows. First matching window wins.
+    public var bandwidthSchedule: [BandwidthRule]
+
     public static func defaults(homeDir: URL) -> Settings {
         Settings(
             listenPortRangeStart: 49152,
@@ -143,7 +187,8 @@ public struct Settings: Codable, Sendable, Equatable {
             seedLimitAction: .pause,
             minimumSeedTimeMinutes: 60,
             healthStallMinutes: 30,
-            healthReannounceOnStall: true
+            healthReannounceOnStall: true,
+            bandwidthSchedule: []
         )
     }
 
@@ -163,6 +208,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.minimumSeedTimeMinutes = try c.decodeIfPresent(Int.self, forKey: .minimumSeedTimeMinutes) ?? 60
         self.healthStallMinutes = try c.decodeIfPresent(Int.self, forKey: .healthStallMinutes) ?? 30
         self.healthReannounceOnStall = try c.decodeIfPresent(Bool.self, forKey: .healthReannounceOnStall) ?? true
+        self.bandwidthSchedule = try c.decodeIfPresent([BandwidthRule].self, forKey: .bandwidthSchedule) ?? []
     }
 
     public init(
@@ -179,7 +225,8 @@ public struct Settings: Codable, Sendable, Equatable {
         seedLimitAction: SeedLimitAction,
         minimumSeedTimeMinutes: Int,
         healthStallMinutes: Int,
-        healthReannounceOnStall: Bool
+        healthReannounceOnStall: Bool,
+        bandwidthSchedule: [BandwidthRule] = []
     ) {
         self.listenPortRangeStart = listenPortRangeStart
         self.listenPortRangeEnd = listenPortRangeEnd
@@ -195,6 +242,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.minimumSeedTimeMinutes = minimumSeedTimeMinutes
         self.healthStallMinutes = healthStallMinutes
         self.healthReannounceOnStall = healthReannounceOnStall
+        self.bandwidthSchedule = bandwidthSchedule
     }
 }
 
