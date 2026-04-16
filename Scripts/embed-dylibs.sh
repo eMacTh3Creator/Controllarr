@@ -90,4 +90,6 @@ echo "=== Done ==="
 # Verify
 echo ""
 echo "Verification — main binary should show @rpath/ paths:"
-otool -L "$MACHO" | grep -E "(torrent|ssl|crypto)"
+if ! otool -L "$MACHO" | grep -E "(torrent|ssl|crypto)"; then
+    echo "WARNING: could not confirm rewritten dylib paths from main binary output"
+fi

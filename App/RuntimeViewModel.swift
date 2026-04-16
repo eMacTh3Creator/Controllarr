@@ -43,6 +43,7 @@ final class RuntimeViewModel {
     var logEntries: [Logger.Entry] = []
     var diskSpaceStatus: DiskSpaceMonitor.Status?
     var vpnStatus: VPNMonitor.Status?
+    var networkDiagnostics: NetworkDiagnostics.Snapshot?
     var arrNotifications: [ArrNotifier.Notification] = []
     var recoveryRecords: [RecoveryCenter.Record] = []
 
@@ -115,17 +116,34 @@ final class RuntimeViewModel {
         async let rr = rc.snapshot()
         let log = await logger.snapshot(limit: 200)
 
-        self.torrents = await t
-        self.session = await s
-        self.categories = await c
-        self.settings = await st
-        self.healthIssues = await h
-        self.postRecords = await p
-        self.seedingLog = await sl
-        self.diskSpaceStatus = await ds
-        self.vpnStatus = await vp
-        self.arrNotifications = await ar
-        self.recoveryRecords = await rr
+        let torrents = await t
+        let session = await s
+        let categories = await c
+        let settings = await st
+        let health = await h
+        let post = await p
+        let seeding = await sl
+        let disk = await ds
+        let vpnStatus = await vp
+        let arr = await ar
+        let recovery = await rr
+
+        self.torrents = torrents
+        self.session = session
+        self.categories = categories
+        self.settings = settings
+        self.healthIssues = health
+        self.postRecords = post
+        self.seedingLog = seeding
+        self.diskSpaceStatus = disk
+        self.vpnStatus = vpnStatus
+        self.networkDiagnostics = NetworkDiagnostics.snapshot(
+            bindHost: settings.webUIHost,
+            bindPort: settings.webUIPort,
+            vpnStatus: vpnStatus
+        )
+        self.arrNotifications = arr
+        self.recoveryRecords = recovery
         self.logEntries = log
     }
 
@@ -228,7 +246,10 @@ final class RuntimeViewModel {
     }
 
     func openWebUI() {
-        let url = URL(string: "http://\(settings.webUIHost):\(settings.webUIPort)/")
+        let host = NetworkDiagnostics.localHostForOpen(
+            NetworkDiagnostics.normalizedHost(settings.webUIHost)
+        )
+        let url = URL(string: "http://\(host):\(settings.webUIPort)/")
         if let url { NSWorkspace.shared.open(url) }
     }
 

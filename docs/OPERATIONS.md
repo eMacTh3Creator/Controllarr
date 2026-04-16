@@ -21,6 +21,31 @@ Notes:
 - The daemon uses the same persistence store, HTTP API, and WebUI bundle as the desktop app.
 - If `WebUI/dist` cannot be found, the daemon still runs in API-only mode.
 - `Ctrl-C` triggers a clean shutdown so the current listen port and state are flushed.
+- For LAN access from another machine, bind the WebUI to `0.0.0.0`, restart Controllarr, and connect to the Mac's LAN IP instead of `127.0.0.1`.
+
+## Remote Access and VPN Diagnostics
+
+Controllarr now includes a built-in network diagnostics panel in both the native Settings view and the WebUI Settings tab.
+
+### What It Shows
+
+- the current WebUI/API bind host and port
+- the local URL the Mac itself should open
+- detected private LAN IPs on the Mac
+- the currently detected VPN interface and IP
+- whether torrent traffic is bound to the VPN adapter
+- a recommended LAN URL for Sonarr, Radarr, Overseerr, or another browser on your network
+
+### How To Use It
+
+- Bind the WebUI to `0.0.0.0` or a specific LAN IP such as `192.168.1.122`
+- Save settings and restart Controllarr so the HTTP server rebinds
+- Point remote clients at the recommended LAN URL, not `127.0.0.1` and not `0.0.0.0`
+
+### VPN Caveat
+
+- Controllarr already keeps torrent traffic on the VPN adapter separately from the WebUI/API listener
+- If diagnostics say remote access is configured correctly but other machines still cannot connect while the VPN is on, the VPN client is likely blocking inbound LAN traffic at the OS/filter level
 
 ## Backup, Export, and Restore
 

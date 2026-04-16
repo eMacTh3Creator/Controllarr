@@ -753,10 +753,61 @@ struct SettingsView: View {
         )
         Form {
             Section("WebUI") {
-                TextField("Host", text: binding.webUIHost)
+                TextField("Bind host", text: binding.webUIHost)
                 TextField("Port", value: binding.webUIPort, format: .number)
                 TextField("Username", text: binding.webUIUsername)
                 SecureField("Password", text: binding.webUIPassword)
+                Text("Use 0.0.0.0 for LAN clients like Sonarr, Radarr, and Overseerr on another machine. Restart Controllarr after changing the bind host or port.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Network diagnostics") {
+                if let diagnostics = vm.networkDiagnostics {
+                    LabeledContent("Current bind", value: "\(diagnostics.bindHost):\(diagnostics.bindPort)")
+                    LabeledContent("Local open URL", value: diagnostics.localOpenURL)
+                    LabeledContent("Recommended LAN URL", value: diagnostics.recommendedRemoteURL ?? "—")
+                    if diagnostics.lanInterfaces.isEmpty {
+                        Text("No private LAN interfaces detected on this Mac.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Detected LAN IPs")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            ForEach(diagnostics.lanInterfaces) { iface in
+                                Text("\(iface.name): \(iface.ip)")
+                                    .font(.caption.monospaced())
+                            }
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        Image(systemName: diagnostics.vpnConnected ? "lock.shield.fill" : "lock.open")
+                            .foregroundStyle(diagnostics.vpnConnected ? .green : .secondary)
+                        Text(
+                            diagnostics.vpnConnected
+                                ? "VPN: \(diagnostics.vpnInterfaceName ?? "?") (\(diagnostics.vpnInterfaceIP ?? "?"))"
+                                : "VPN: not detected"
+                        )
+                        .font(.caption)
+                        if diagnostics.vpnBoundToTorrentEngine {
+                            Text("Torrent engine bound to VPN")
+                                .font(.caption)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.green.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                        }
+                    }
+                    if let warning = diagnostics.warning {
+                        Text(warning)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                } else {
+                    Text("Collecting current network diagnostics…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Section("Listen port range") {
                 TextField("Start", value: binding.listenPortRangeStart, format: .number)

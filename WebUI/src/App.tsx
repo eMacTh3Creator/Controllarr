@@ -13,6 +13,7 @@ import {
   type DiskSpaceStatus,
   type HealthIssue,
   type LogEntry,
+  type NetworkDiagnostics,
   type PostProcessorRecord,
   type RecoveryAction,
   type RecoveryRecord,
@@ -1210,11 +1211,11 @@ function SettingsTab({
         <section className="form-panel">
           <div className="form-panel-header">
             <h3>WebUI</h3>
-            <p>Connection details for the browser-facing admin interface.</p>
+            <p>Binding details for the browser-facing admin interface. Use 0.0.0.0 for LAN access from Sonarr, Radarr, or Overseerr on another machine, then restart Controllarr.</p>
           </div>
           <div className="form-grid">
             <label className="field">
-              <span>Host</span>
+              <span>Bind host</span>
               <input
                 value={settings.webUIHost}
                 onChange={(event) => patch({ webUIHost: event.target.value })}
@@ -1431,6 +1432,11 @@ function SettingsTab({
         vpnInterfacePrefix={settings.vpnInterfacePrefix}
         vpnMonitorIntervalSeconds={settings.vpnMonitorIntervalSeconds}
         onChange={(vpnFields) => patch(vpnFields)}
+      />
+
+      <NetworkDiagnosticsSection
+        draftBindHost={settings.webUIHost}
+        draftBindPort={settings.webUIPort}
       />
 
       <DiskSpaceMonitorSection
@@ -1867,6 +1873,116 @@ function VPNProtectionSection({
         )}
       </section>
     </div>
+  )
+}
+
+function NetworkDiagnosticsSection({
+  draftBindHost,
+  draftBindPort,
+}: {
+  draftBindHost: string
+  draftBindPort: number
+}) {
+  const [diagnostics, setDiagnostics] = useState<NetworkDiagnostics | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function poll() {
+      try {
+        const snapshot = await api.networkDiagnostics()
+        if (!cancelled) setDiagnostics(snapshot)
+      } catch {
+        // best-effort
+      }
+    }
+
+    void poll()
+    const interval = window.setInterval(poll, 5_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [])
+
+  const draftDiffers =
+    diagnostics !== null
+    && (diagnostics.bindHost !== draftBindHost || diagnostics.bindPort !== draftBindPort)
+
+  return (
+    <section className="form-panel">
+      <div className="form-panel-header">
+        <h3>Network diagnostics</h3>
+        <p>Verify that the control plane is reachable over LAN while torrent traffic stays on the VPN adapter.</p>
+      </div>
+
+      {draftDiffers && (
+        <Banner
+          tone="success"
+          message="Draft WebUI host/port changes have not reached the running server yet. Save settings and restart Controllarr to apply them."
+        />
+      )}
+
+      {!diagnostics ? (
+        <p style={{ color: 'var(--muted)' }}>Collecting current runtime network diagnostics...</p>
+      ) : (
+        <>
+          {diagnostics.warning && <Banner tone="error" message={diagnostics.warning} />}
+          <div className="form-grid">
+            <div className="field">
+              <span>Current bind</span>
+              <strong className="mono-cell">
+                {diagnostics.bindHost}:{diagnostics.bindPort}
+              </strong>
+            </div>
+            <div className="field">
+              <span>Local open URL</span>
+              <strong className="mono-cell">{diagnostics.localOpenURL}</strong>
+            </div>
+            <div className="field wide">
+              <span>Recommended LAN URL</span>
+              <strong className="mono-cell">{diagnostics.recommendedRemoteURL ?? '—'}</strong>
+            </div>
+            <div className="field">
+              <span>VPN</span>
+              <strong>
+                {diagnostics.vpnConnected
+                  ? `${diagnostics.vpnInterfaceName || 'Connected'} (${diagnostics.vpnInterfaceIP || 'no IP'})`
+                  : 'Not detected'}
+              </strong>
+            </div>
+            <div className="field">
+              <span>Torrent traffic</span>
+              <strong>{diagnostics.vpnBoundToTorrentEngine ? 'Bound to VPN' : 'Not VPN-bound'}</strong>
+            </div>
+            <div className="field">
+              <span>Remote access</span>
+              <span className={`pill ${diagnostics.remoteAccessConfigured ? 'green' : 'amber'}`}>
+                {diagnostics.remoteAccessConfigured ? 'Configured' : 'Not configured'}
+              </span>
+            </div>
+            <div className="field wide">
+              <span>Detected LAN IPs</span>
+              {diagnostics.lanInterfaces.length === 0 ? (
+                <strong>None detected</strong>
+              ) : (
+                <code style={{ whiteSpace: 'normal', wordBreak: 'break-all' }}>
+                  {diagnostics.lanInterfaces.map((iface) => `${iface.name}: ${iface.ip}`).join(', ')}
+                </code>
+              )}
+            </div>
+            {diagnostics.suggestedRemoteURLs.length > 0 && (
+              <div className="field wide">
+                <span>Remote clients can try</span>
+                <code style={{ whiteSpace: 'normal', wordBreak: 'break-all' }}>
+                  {diagnostics.suggestedRemoteURLs.join(', ')}
+                </code>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </section>
   )
 }
 

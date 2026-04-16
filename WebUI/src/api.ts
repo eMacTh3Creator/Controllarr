@@ -114,6 +114,26 @@ export type VPNStatus = {
   boundToVPN: boolean
 }
 
+export type NetworkLANInterface = {
+  name: string
+  ip: string
+}
+
+export type NetworkDiagnostics = {
+  bindHost: string
+  bindPort: number
+  localOpenURL: string
+  remoteAccessConfigured: boolean
+  suggestedRemoteURLs: string[]
+  recommendedRemoteURL?: string
+  vpnConnected: boolean
+  vpnInterfaceName: string
+  vpnInterfaceIP: string
+  vpnBoundToTorrentEngine: boolean
+  lanInterfaces: NetworkLANInterface[]
+  warning?: string
+}
+
 export type BackupImportResult = {
   restoredAt: number
   categoryCount: number
@@ -450,6 +470,10 @@ export const api = {
     return json<DiskSpaceStatus>('/api/controllarr/diskspace/recheck', {
       method: 'POST',
     })
+  },
+
+  async networkDiagnostics(): Promise<NetworkDiagnostics> {
+    return json<NetworkDiagnostics>('/api/controllarr/network')
   },
 
   async arrNotifications(): Promise<ArrNotification[]> {

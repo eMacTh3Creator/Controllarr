@@ -818,6 +818,19 @@ public enum QBittorrentAPI {
             return json(diskSpaceStatus(status))
         }
 
+        // MARK: Controllarr: network diagnostics
+
+        router.get("/api/controllarr/network") { _, _ -> Response in
+            let settings = await services.store.settings()
+            let vpn = await services.vpnMonitor.snapshot()
+            let snapshot = NetworkDiagnostics.snapshot(
+                bindHost: settings.webUIHost,
+                bindPort: settings.webUIPort,
+                vpnStatus: vpn
+            )
+            return json(networkDiagnosticsDict(snapshot))
+        }
+
         // MARK: Controllarr: VPN monitor
 
         router.get("/api/controllarr/vpn") { _, _ -> Response in
@@ -988,6 +1001,33 @@ public enum QBittorrentAPI {
             "pausedCount": status.pausedHashes.count,
             "pausedHashes": status.pausedHashes.sorted(),
         ]
+    }
+
+    static func networkDiagnosticsDict(_ snapshot: NetworkDiagnostics.Snapshot) -> [String: Any] {
+        var dict: [String: Any] = [
+            "bindHost": snapshot.bindHost,
+            "bindPort": snapshot.bindPort,
+            "localOpenURL": snapshot.localOpenURL,
+            "remoteAccessConfigured": snapshot.remoteAccessConfigured,
+            "suggestedRemoteURLs": snapshot.suggestedRemoteURLs,
+            "vpnConnected": snapshot.vpnConnected,
+            "vpnInterfaceName": snapshot.vpnInterfaceName ?? "",
+            "vpnInterfaceIP": snapshot.vpnInterfaceIP ?? "",
+            "vpnBoundToTorrentEngine": snapshot.vpnBoundToTorrentEngine,
+            "lanInterfaces": snapshot.lanInterfaces.map { iface in
+                [
+                    "name": iface.name,
+                    "ip": iface.ip,
+                ]
+            },
+        ]
+        if let recommended = snapshot.recommendedRemoteURL {
+            dict["recommendedRemoteURL"] = recommended
+        }
+        if let warning = snapshot.warning {
+            dict["warning"] = warning
+        }
+        return dict
     }
 
     // MARK: - Utilities
