@@ -53,8 +53,11 @@ cd WebUI && npm install && npm run build && cd ..
 xcodegen generate
 xcodebuild -project Controllarr.xcodeproj -scheme Controllarr -configuration Release \
   -derivedDataPath /tmp/ControllarrBuild CODE_SIGN_IDENTITY="-"
+# Dylibs are embedded automatically by the post-build script.
 open /tmp/ControllarrBuild/Build/Products/Release/Controllarr.app
 ```
+
+The build automatically copies libtorrent-rasterbar and OpenSSL dylibs from Homebrew into the `.app` bundle and rewrites load paths, so the resulting app is self-contained.
 
 The Phase 0 CLI proof-of-concept is still buildable with `swift build` and runs as `.build/debug/ControllarrPoC <magnet-uri>`.
 

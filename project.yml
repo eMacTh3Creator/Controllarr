@@ -44,6 +44,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.controllarr.Controllarr
         MACOSX_DEPLOYMENT_TARGET: "15.0"
         CODE_SIGN_ENTITLEMENTS: App/Controllarr.entitlements
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
     info:
       path: App/Info.plist
       properties:
@@ -73,3 +74,7 @@ targets:
         product: HTTPServer
       - package: Sparkle
         product: Sparkle
+    postBuildScripts:
+      - script: |
+          "${PROJECT_DIR}/scripts/embed-dylibs.sh" "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app"
+        name: "Embed Homebrew dylibs"
