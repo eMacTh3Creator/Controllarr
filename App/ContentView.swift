@@ -186,6 +186,52 @@ private struct SessionStatusBar: View {
 
 // MARK: - Torrents tab
 
+/// Status groupings the operator can dropdown-filter on. Matches the nested
+/// set Everett requested: All, Downloading, Seeding, Completed, Running,
+/// Stopped, Active, Inactive, Stalled, Moving, Errored.
+enum TorrentStatusFilter: String, CaseIterable, Identifiable {
+    case all, downloading, seeding, completed, running, stopped
+    case active, inactive, stalled, moving, errored
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all:         return "All"
+        case .downloading: return "Downloading"
+        case .seeding:     return "Seeding"
+        case .completed:   return "Completed"
+        case .running:     return "Running"
+        case .stopped:     return "Stopped"
+        case .active:      return "Active"
+        case .inactive:    return "Inactive"
+        case .stalled:     return "Stalled"
+        case .moving:      return "Moving"
+        case .errored:     return "Errored"
+        }
+    }
+
+    func matches(_ t: TorrentStats) -> Bool {
+        switch self {
+        case .all:         return true
+        case .downloading: return !t.paused && t.state == .downloading
+        case .seeding:     return !t.paused && t.state == .seeding
+        case .completed:   return t.progress >= 1.0
+        case .running:     return !t.paused
+        case .stopped:     return t.paused
+        case .active:      return t.downloadRate > 0 || t.uploadRate > 0
+        case .inactive:    return t.downloadRate == 0 && t.uploadRate == 0
+        case .stalled:
+            // No peers and not paused, or no data movement for a downloading item.
+            return !t.paused && t.numPeers == 0 && t.state == .downloading
+        case .moving:      return t.state == .checkingFiles || t.state == .checkingResume
+        case .errored:
+            // No engine error field yet — approximate with "stopped while < 100%".
+            return t.paused && t.progress < 1.0
+        }
+    }
+}
+
 struct TorrentsView: View {
     @Bindable var vm: RuntimeViewModel
     @State private var addOpen = false
@@ -194,18 +240,58 @@ struct TorrentsView: View {
     @State private var addError: String?
     @State private var selectedHash: String?
     @State private var dropTargeted = false
+    @State private var statusFilter: TorrentStatusFilter = .all
+    @State private var sortOrder: [KeyPathComparator<TorrentStats>] = [
+        KeyPathComparator(\.name, order: .forward)
+    ]
+    @State private var showCategorySheet = false
+    /// Column widths and ordering persist across launches via @SceneStorage.
+    @SceneStorage("TorrentsTable.columnCustomization")
+    private var columnCustomization: TableColumnCustomization<TorrentStats>
+
+    private var filteredSortedTorrents: [TorrentStats] {
+        vm.torrents.filter { statusFilter.matches($0) }.sorted(using: sortOrder)
+    }
 
     var body: some View {
         VSplitView {
             VStack(spacing: 0) {
-                Table(vm.torrents, selection: $selectedHash) {
-                    TableColumn("Name") { t in
+                // Filter toolbar
+                HStack(spacing: 8) {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .foregroundStyle(.secondary)
+                    Picker("Status", selection: $statusFilter) {
+                        ForEach(TorrentStatusFilter.allCases) { f in
+                            Text(f.title).tag(f)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 180)
+                    .onChange(of: statusFilter) { _, new in
+                        var s = vm.settings
+                        s.uiPreferences.torrentStatusFilter = new.rawValue
+                        Task { await vm.saveSettings(s) }
+                    }
+                    Spacer()
+                    Text("\(filteredSortedTorrents.count) of \(vm.torrents.count)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 2)
+
+                Table(
+                    filteredSortedTorrents,
+                    selection: $selectedHash,
+                    sortOrder: $sortOrder,
+                    columnCustomization: $columnCustomization
+                ) {
+                    TableColumn("Name", value: \.name) { t in
                         Text(t.name).lineLimit(1).truncationMode(.middle)
                     }
-                    TableColumn("Size") { t in
+                    .customizationID("name")
+                    TableColumn("Size", value: \.totalWanted) { t in
                         Text(formatBytes(t.totalWanted)).monospacedDigit()
-                    }.width(min: 80, ideal: 90)
-                    TableColumn("Progress") { t in
+                    }.width(min: 80, ideal: 90).customizationID("size")
+                    TableColumn("Progress", value: \.progress) { t in
                         VStack(alignment: .leading, spacing: 2) {
                             ProgressView(value: Double(t.progress))
                                 .progressViewStyle(.linear)
@@ -214,27 +300,35 @@ struct TorrentsView: View {
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(.secondary)
                         }
-                    }.width(min: 120, ideal: 140)
+                    }.width(min: 120, ideal: 140).customizationID("progress")
                     TableColumn("State") { t in
                         Text(t.paused ? "paused" : "\(t.state)")
                             .font(.caption)
                             .foregroundStyle(t.paused ? .orange : .primary)
-                    }.width(min: 70, ideal: 90)
-                    TableColumn("↓") { t in
+                    }.width(min: 70, ideal: 90).customizationID("state")
+                    TableColumn("↓", value: \.downloadRate) { t in
                         Text(formatRate(t.downloadRate)).monospacedDigit().font(.caption)
-                    }.width(min: 70, ideal: 80)
-                    TableColumn("↑") { t in
+                    }.width(min: 70, ideal: 80).customizationID("down")
+                    TableColumn("↑", value: \.uploadRate) { t in
                         Text(formatRate(t.uploadRate)).monospacedDigit().font(.caption)
-                    }.width(min: 70, ideal: 80)
-                    TableColumn("Peers") { t in
+                    }.width(min: 70, ideal: 80).customizationID("up")
+                    TableColumn("Peers", value: \.numPeers) { t in
                         Text("\(t.numPeers)").monospacedDigit().font(.caption)
-                    }.width(min: 50, ideal: 60)
-                    TableColumn("Ratio") { t in
+                    }.width(min: 50, ideal: 60).customizationID("peers")
+                    TableColumn("Ratio", value: \.ratio) { t in
                         Text(String(format: "%.2f", t.ratio)).monospacedDigit().font(.caption)
-                    }.width(min: 55, ideal: 65)
+                    }.width(min: 55, ideal: 65).customizationID("ratio")
                     TableColumn("Category") { t in
                         Text(t.category ?? "—").font(.caption).foregroundStyle(.secondary)
-                    }.width(min: 80, ideal: 100)
+                    }.width(min: 80, ideal: 100).customizationID("category")
+                }
+                .onAppear {
+                    // Hydrate persisted status filter on first load.
+                    if let restored = TorrentStatusFilter(
+                        rawValue: vm.settings.uiPreferences.torrentStatusFilter
+                    ) {
+                        statusFilter = restored
+                    }
                 }
 
                 Divider()
@@ -575,6 +669,14 @@ struct CategoriesView: View {
     @Bindable var vm: RuntimeViewModel
     @State private var editing: Persistence.Category?
     @State private var selectedName: String?
+    @State private var pendingPathChange: PendingCategoryPathChange?
+
+    /// Payload for the "move existing torrents to new path?" confirmation.
+    struct PendingCategoryPathChange: Identifiable {
+        let id = UUID()
+        let category: String
+        let newPath: String
+    }
 
     var body: some View {
         HSplitView {
@@ -607,7 +709,7 @@ struct CategoriesView: View {
             .frame(minWidth: 240)
 
             if let name = selectedName, let cat = vm.categories.first(where: { $0.name == name }) {
-                CategoryDetail(category: cat)
+                CategoryDetail(category: cat, vm: vm)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Text("Select or create a category")
@@ -618,36 +720,124 @@ struct CategoriesView: View {
         .sheet(item: $editing) { cat in
             CategoryEditor(original: cat) { updated in
                 Task {
+                    let existing = vm.categories.first(where: { $0.name == updated.name })
+                    let pathChanged = existing != nil
+                        && existing!.savePath != updated.savePath
+                        && !updated.savePath.isEmpty
                     await vm.saveCategory(updated)
                     editing = nil
+                    if pathChanged {
+                        pendingPathChange = PendingCategoryPathChange(
+                            category: updated.name, newPath: updated.savePath
+                        )
+                    }
                 }
             } onCancel: {
                 editing = nil
             }
             .frame(minWidth: 520, minHeight: 460)
         }
+        .alert(
+            "Move existing torrents to new location?",
+            isPresented: Binding(
+                get: { pendingPathChange != nil },
+                set: { if !$0 { pendingPathChange = nil } }
+            ),
+            presenting: pendingPathChange
+        ) { change in
+            Button("Move files") {
+                Task {
+                    _ = await vm.applyCategoryPathChange(
+                        category: change.category,
+                        newPath: change.newPath,
+                        moveFiles: true
+                    )
+                    pendingPathChange = nil
+                }
+            }
+            Button("Leave them", role: .cancel) {
+                pendingPathChange = nil
+            }
+        } message: { change in
+            Text("Torrents tagged \"\(change.category)\" will be moved to \(change.newPath). This runs libtorrent's storage move in the background — the files stay available during the copy.")
+        }
     }
 }
 
 private struct CategoryDetail: View {
     let category: Persistence.Category
+    @Bindable var vm: RuntimeViewModel
+    @State private var statusFilter: TorrentStatusFilter = .all
+
+    private var categoryTorrents: [TorrentStats] {
+        vm.torrents
+            .filter { ($0.category ?? "") == category.name && statusFilter.matches($0) }
+    }
+
     var body: some View {
-        Form {
-            LabeledContent("Save path", value: category.savePath)
-            if let cp = category.completePath, !cp.isEmpty {
-                LabeledContent("Complete path", value: cp)
+        VSplitView {
+            Form {
+                LabeledContent("Save path", value: category.savePath)
+                if let cp = category.completePath, !cp.isEmpty {
+                    LabeledContent("Complete path", value: cp)
+                }
+                LabeledContent("Extract archives", value: category.extractArchives ? "yes" : "no")
+                LabeledContent("Blocked extensions", value: category.blockedExtensions.isEmpty ? "—" : category.blockedExtensions.joined(separator: ", "))
+                if let r = category.maxRatio {
+                    LabeledContent("Max ratio", value: String(format: "%.2f", r))
+                }
+                if let m = category.maxSeedingTimeMinutes {
+                    LabeledContent("Max seed time", value: "\(m) min")
+                }
             }
-            LabeledContent("Extract archives", value: category.extractArchives ? "yes" : "no")
-            LabeledContent("Blocked extensions", value: category.blockedExtensions.isEmpty ? "—" : category.blockedExtensions.joined(separator: ", "))
-            if let r = category.maxRatio {
-                LabeledContent("Max ratio", value: String(format: "%.2f", r))
+            .formStyle(.grouped)
+            .frame(minHeight: 120, idealHeight: 200)
+
+            // Torrents in this category, with the same status filter as the
+            // main Torrents tab.
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .foregroundStyle(.secondary)
+                    Picker("Status", selection: $statusFilter) {
+                        ForEach(TorrentStatusFilter.allCases) { f in
+                            Text(f.title).tag(f)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 180)
+                    Spacer()
+                    Text("\(categoryTorrents.count) torrents")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 2)
+
+                Table(categoryTorrents) {
+                    TableColumn("Name") { t in
+                        Text(t.name).lineLimit(1).truncationMode(.middle)
+                    }
+                    TableColumn("State") { t in
+                        Text(t.paused ? "paused" : "\(t.state)")
+                            .font(.caption)
+                            .foregroundStyle(t.paused ? .orange : .primary)
+                    }.width(min: 70, ideal: 90)
+                    TableColumn("Progress") { t in
+                        Text(String(format: "%.0f%%", t.progress * 100))
+                            .monospacedDigit().font(.caption)
+                    }.width(min: 70, ideal: 80)
+                    TableColumn("↓") { t in
+                        Text(formatRate(t.downloadRate)).monospacedDigit().font(.caption)
+                    }.width(min: 70, ideal: 80)
+                    TableColumn("↑") { t in
+                        Text(formatRate(t.uploadRate)).monospacedDigit().font(.caption)
+                    }.width(min: 70, ideal: 80)
+                    TableColumn("Ratio") { t in
+                        Text(String(format: "%.2f", t.ratio)).monospacedDigit().font(.caption)
+                    }.width(min: 55, ideal: 65)
+                }
             }
-            if let m = category.maxSeedingTimeMinutes {
-                LabeledContent("Max seed time", value: "\(m) min")
-            }
+            .frame(minHeight: 180)
         }
-        .formStyle(.grouped)
-        .padding()
     }
 }
 
@@ -694,6 +884,8 @@ private struct CategoryEditor: View {
                 Section("Post-complete") {
                     Toggle("Extract archives (.rar/.zip/.7z)", isOn: $extractArchives)
                     TextField("Blocked extensions (comma separated)", text: $blockedExtensions)
+                    Text("e.g. .exe, .lnk, .scr — leading dot optional, matched case-insensitively against each file's extension. Listed files are skipped (libtorrent priority 0).")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Seeding limits (override global)") {
                     Toggle("Override max ratio", isOn: $hasMaxRatio)
@@ -741,16 +933,171 @@ private struct CategoryEditor: View {
 
 // MARK: - Settings tab
 
+/// Sidebar sections used by the native Settings screen. Keeping them in an
+/// enum lets the search field filter both by section title and by keyword
+/// synonyms without maintaining a parallel index.
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case general, network, peers, connections, security, interface
+    case seeding, health, vpn, disk, integrations, recovery, backup
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .general:      return "General"
+        case .network:      return "Network"
+        case .peers:        return "Peer Discovery"
+        case .connections:  return "Connection Limits"
+        case .security:     return "Security"
+        case .interface:    return "Interface"
+        case .seeding:      return "Seeding"
+        case .health:       return "Health"
+        case .vpn:          return "VPN"
+        case .disk:         return "Disk Space"
+        case .integrations: return "*arr Integrations"
+        case .recovery:     return "Recovery"
+        case .backup:       return "Backup"
+        }
+    }
+    var systemImage: String {
+        switch self {
+        case .general:      return "gearshape"
+        case .network:      return "network"
+        case .peers:        return "dot.radiowaves.left.and.right"
+        case .connections:  return "slider.horizontal.3"
+        case .security:     return "lock.shield"
+        case .interface:    return "macwindow"
+        case .seeding:      return "leaf"
+        case .health:       return "heart.text.square"
+        case .vpn:          return "key.horizontal"
+        case .disk:         return "externaldrive"
+        case .integrations: return "antenna.radiowaves.left.and.right"
+        case .recovery:     return "arrow.counterclockwise"
+        case .backup:       return "archivebox"
+        }
+    }
+    /// Search keywords beyond the title so typing e.g. "DHT" surfaces Peers.
+    var keywords: [String] {
+        switch self {
+        case .general:      return ["webui","host","port","save path","listen","default"]
+        case .network:      return ["diagnostics","lan","bind"]
+        case .peers:        return ["dht","pex","lsd","local service","distributed hash"]
+        case .connections:  return ["max","connections","upload slots","unchoke"]
+        case .security:     return ["cidr","allowlist","csrf","clickjack","x-frame"]
+        case .interface:    return ["menu bar","start minimized","close"]
+        case .seeding:      return ["ratio","seed time","pause","remove"]
+        case .health:       return ["stall","reannounce"]
+        case .vpn:          return ["utun","kill switch","leak","wireguard"]
+        case .disk:         return ["free space","monitor","gb"]
+        case .integrations: return ["sonarr","radarr","arr","re-search"]
+        case .recovery:     return ["rules","auto"]
+        case .backup:       return ["export","import","restore"]
+        }
+    }
+    func matchesQuery(_ q: String) -> Bool {
+        let needle = q.lowercased().trimmingCharacters(in: .whitespaces)
+        if needle.isEmpty { return true }
+        if title.lowercased().contains(needle) { return true }
+        return keywords.contains { $0.lowercased().contains(needle) }
+    }
+}
+
 struct SettingsView: View {
     @Bindable var vm: RuntimeViewModel
     @State private var draft: Persistence.Settings?
     @State private var saved: Bool = false
+    @State private var section: SettingsSection = .general
+    @State private var query: String = ""
+
+    private var visibleSections: [SettingsSection] {
+        SettingsSection.allCases.filter { $0.matchesQuery(query) }
+    }
 
     var body: some View {
         let binding = Binding<Persistence.Settings>(
             get: { draft ?? vm.settings },
             set: { draft = $0 }
         )
+        HSplitView {
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary).font(.caption)
+                    TextField("Search settings", text: $query)
+                        .textFieldStyle(.plain)
+                        .font(.caption)
+                }
+                .padding(8)
+                Divider()
+                List(selection: $section) {
+                    ForEach(visibleSections) { s in
+                        Label(s.title, systemImage: s.systemImage).tag(s)
+                    }
+                }
+                .listStyle(.sidebar)
+            }
+            .frame(minWidth: 200, idealWidth: 220, maxWidth: 280)
+
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        switch section {
+                        case .general:      generalSection(binding: binding)
+                        case .network:      networkSection(binding: binding)
+                        case .peers:        peersSection(binding: binding)
+                        case .connections:  connectionsSection(binding: binding)
+                        case .security:     securitySection(binding: binding)
+                        case .interface:    interfaceSection(binding: binding)
+                        case .seeding:      seedingSection(binding: binding)
+                        case .health:       healthSection(binding: binding)
+                        case .vpn:          vpnSection(binding: binding)
+                        case .disk:         diskSection(binding: binding)
+                        case .integrations: integrationsSection(binding: binding)
+                        case .recovery:
+                            Form {
+                                RecoveryRulesSection(rules: Binding(
+                                    get: { (draft ?? vm.settings).recoveryRules },
+                                    set: {
+                                        if draft == nil { draft = vm.settings }
+                                        draft?.recoveryRules = $0
+                                    }
+                                ))
+                            }
+                            .formStyle(.grouped)
+                        case .backup:
+                            Form { BackupRestoreSection(vm: vm) }
+                                .formStyle(.grouped)
+                        }
+                    }
+                    .padding(.bottom, 8)
+                }
+                Divider()
+                HStack {
+                    Button("Save") {
+                        Task {
+                            if let d = draft {
+                                await vm.saveSettings(d)
+                                saved = true
+                            }
+                        }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(draft == nil)
+                    Button("Revert") { draft = nil; saved = false }
+                        .disabled(draft == nil)
+                    if saved {
+                        Text("Saved").foregroundStyle(.secondary).font(.caption)
+                    }
+                    Spacer()
+                }
+                .padding(8)
+            }
+        }
+    }
+
+    // MARK: - General
+
+    @ViewBuilder
+    private func generalSection(binding: Binding<Persistence.Settings>) -> some View {
         Form {
             Section("WebUI") {
                 TextField("Bind host", text: binding.webUIHost)
@@ -761,6 +1108,35 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Listen port range") {
+                TextField("Start", value: binding.listenPortRangeStart, format: .number)
+                TextField("End", value: binding.listenPortRangeEnd, format: .number)
+                Stepper(value: binding.stallThresholdMinutes, in: 1...240) {
+                    Text("Port stall threshold: \(binding.wrappedValue.stallThresholdMinutes) min")
+                }
+                Button("Cycle port now") { Task { await vm.cyclePort() } }
+            }
+            Section("Default save path") {
+                TextField("Path", text: binding.defaultSavePath)
+            }
+            Section("Categories") {
+                Picker("When category changes", selection: binding.categoryChangeMove) {
+                    Text("Ask each time").tag(CategoryMovePolicy.ask)
+                    Text("Always move files").tag(CategoryMovePolicy.always)
+                    Text("Never move files").tag(CategoryMovePolicy.never)
+                }
+                Text("Controls what happens when a torrent is reassigned to a different category. The native UI always prompts; the WebAPI uses this default when its `moveFiles` flag is omitted.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - Network diagnostics
+
+    @ViewBuilder
+    private func networkSection(binding: Binding<Persistence.Settings>) -> some View {
+        Form {
             Section("Network diagnostics") {
                 if let diagnostics = vm.networkDiagnostics {
                     LabeledContent("Current bind", value: "\(diagnostics.bindHost):\(diagnostics.bindPort)")
@@ -809,19 +1185,144 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Section("Listen port range") {
-                TextField("Start", value: binding.listenPortRangeStart, format: .number)
-                TextField("End", value: binding.listenPortRangeEnd, format: .number)
-                Stepper(value: binding.stallThresholdMinutes, in: 1...240) {
-                    Text("Port stall threshold: \(binding.wrappedValue.stallThresholdMinutes) min")
-                }
-                Button("Cycle port now") {
-                    Task { await vm.cyclePort() }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - Peer discovery
+
+    @ViewBuilder
+    private func peersSection(binding: Binding<Persistence.Settings>) -> some View {
+        Form {
+            Section("Peer discovery") {
+                Toggle("DHT (Distributed Hash Table)", isOn: binding.peerDiscovery.dhtEnabled)
+                Text("Trackerless peer discovery via the BitTorrent DHT. Disable if your tracker forbids it or your VPN policy requires it.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("PeX (Peer Exchange)", isOn: binding.peerDiscovery.pexEnabled)
+                Text("Learns new peers from already-connected peers. Applies on the next Controllarr restart — libtorrent 2.x has no runtime toggle for PeX.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("LSD (Local Service Discovery)", isOn: binding.peerDiscovery.lsdEnabled)
+                Text("Broadcasts on the LAN to find other local clients. Usually noise unless you have multiple peers on the same network.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - Connection limits
+
+    @ViewBuilder
+    private func connectionsSection(binding: Binding<Persistence.Settings>) -> some View {
+        Form {
+            Section("Connection limits") {
+                optionalIntRow(
+                    title: "Global max connections",
+                    binding: binding.connectionLimits.globalMaxConnections,
+                    defaultValue: 500
+                )
+                optionalIntRow(
+                    title: "Per-torrent max connections",
+                    binding: binding.connectionLimits.maxConnectionsPerTorrent,
+                    defaultValue: 100
+                )
+                optionalIntRow(
+                    title: "Global max uploads (unchoke slots)",
+                    binding: binding.connectionLimits.globalMaxUploads,
+                    defaultValue: 20
+                )
+                optionalIntRow(
+                    title: "Per-torrent max uploads",
+                    binding: binding.connectionLimits.maxUploadsPerTorrent,
+                    defaultValue: 4
+                )
+                Text("Leave unchecked to inherit libtorrent's defaults. Raising these aggressively can saturate home routers and crowd out other traffic.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - Security
+
+    @ViewBuilder
+    private func securitySection(binding: Binding<Persistence.Settings>) -> some View {
+        Form {
+            Section("WebUI protection") {
+                Toggle("Clickjacking protection (X-Frame-Options + CSP frame-ancestors)",
+                       isOn: binding.webUISecurity.clickjackingProtection)
+                Toggle("CSRF protection on /api/controllarr/*",
+                       isOn: binding.webUISecurity.csrfProtection)
+                Text("Enable CSRF only after your WebUI client has been updated to send the X-CSRF-Token header. Other *arr tools using the qBittorrent /api/v2 surface are unaffected.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("IP allowlist") {
+                Toggle("Restrict WebUI to specific IPs / CIDR ranges",
+                       isOn: binding.webUISecurity.allowlistEnabled)
+                if binding.wrappedValue.webUISecurity.allowlistEnabled {
+                    ForEach(binding.wrappedValue.webUISecurity.allowedCIDRs.indices, id: \.self) { i in
+                        HStack {
+                            TextField("e.g. 192.168.1.0/24", text: Binding(
+                                get: {
+                                    let arr = binding.wrappedValue.webUISecurity.allowedCIDRs
+                                    return i < arr.count ? arr[i] : ""
+                                },
+                                set: {
+                                    var arr = binding.wrappedValue.webUISecurity.allowedCIDRs
+                                    if i < arr.count { arr[i] = $0; binding.wrappedValue.webUISecurity.allowedCIDRs = arr }
+                                }
+                            ))
+                            Button(role: .destructive) {
+                                var arr = binding.wrappedValue.webUISecurity.allowedCIDRs
+                                if i < arr.count {
+                                    arr.remove(at: i)
+                                    binding.wrappedValue.webUISecurity.allowedCIDRs = arr
+                                }
+                            } label: { Image(systemName: "minus.circle") }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    Button {
+                        var arr = binding.wrappedValue.webUISecurity.allowedCIDRs
+                        arr.append("")
+                        binding.wrappedValue.webUISecurity.allowedCIDRs = arr
+                    } label: { Label("Add range", systemImage: "plus") }
+                    Text("Loopback (127.0.0.1, ::1) is always allowed. Behind a reverse proxy, the X-Forwarded-For header is respected.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Section("Default save path") {
-                TextField("Path", text: binding.defaultSavePath)
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - Interface / menu bar
+
+    @ViewBuilder
+    private func interfaceSection(binding: Binding<Persistence.Settings>) -> some View {
+        Form {
+            Section("Menu bar") {
+                Toggle("Show Controllarr in the menu bar", isOn: binding.uiPreferences.menuBarEnabled)
+                Toggle("Close window minimizes to menu bar",
+                       isOn: binding.uiPreferences.closeToMenuBar)
+                    .disabled(!binding.wrappedValue.uiPreferences.menuBarEnabled)
+                Text("When enabled, closing the main window keeps Controllarr running in the background with only the menu-bar icon visible. Torrents continue downloading. Quit from the menu-bar menu.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Launch") {
+                Toggle("Start minimized to menu bar",
+                       isOn: binding.uiPreferences.startMinimized)
+                    .disabled(!binding.wrappedValue.uiPreferences.menuBarEnabled)
+                Text("Launches Controllarr without showing the main window. Requires the menu-bar icon to be enabled.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - Seeding
+
+    @ViewBuilder
+    private func seedingSection(binding: Binding<Persistence.Settings>) -> some View {
+        Form {
             Section("Seeding policy") {
                 Picker("When limit reached", selection: binding.seedLimitAction) {
                     Text("Pause").tag(SeedLimitAction.pause)
@@ -834,12 +1335,30 @@ struct SettingsView: View {
                     Text("Minimum seed time: \(binding.wrappedValue.minimumSeedTimeMinutes) min")
                 }
             }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - Health
+
+    @ViewBuilder
+    private func healthSection(binding: Binding<Persistence.Settings>) -> some View {
+        Form {
             Section("Health monitor") {
                 Stepper(value: binding.healthStallMinutes, in: 1...1440) {
                     Text("Stall threshold: \(binding.wrappedValue.healthStallMinutes) min")
                 }
                 Toggle("Reannounce automatically on stall", isOn: binding.healthReannounceOnStall)
             }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - VPN
+
+    @ViewBuilder
+    private func vpnSection(binding: Binding<Persistence.Settings>) -> some View {
+        Form {
             Section("VPN protection") {
                 Toggle("Enable VPN monitoring", isOn: binding.vpnEnabled)
                 if binding.wrappedValue.vpnEnabled {
@@ -878,6 +1397,15 @@ struct SettingsView: View {
                     }
                 }
             }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - Disk
+
+    @ViewBuilder
+    private func diskSection(binding: Binding<Persistence.Settings>) -> some View {
+        Form {
             Section("Disk space monitor") {
                 optionalIntRow(title: "Minimum free space (GB)", binding: binding.diskSpaceMinimumGB, defaultValue: 10)
                 TextField("Monitor path (empty = default save path)", text: binding.diskSpaceMonitorPath)
@@ -900,6 +1428,15 @@ struct SettingsView: View {
                     }
                 }
             }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - *arr integrations
+
+    @ViewBuilder
+    private func integrationsSection(binding: Binding<Persistence.Settings>) -> some View {
+        Form {
             Section("*arr re-search integration") {
                 Stepper(value: binding.arrReSearchAfterHours, in: 1...168) {
                     Text("Re-search after stall: \(binding.wrappedValue.arrReSearchAfterHours) hours")
@@ -923,31 +1460,6 @@ struct SettingsView: View {
                                 .padding(.vertical, 2)
                                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
                         }
-                    }
-                }
-            }
-            RecoveryRulesSection(rules: Binding(
-                get: { (draft ?? vm.settings).recoveryRules },
-                set: {
-                    if draft == nil { draft = vm.settings }
-                    draft?.recoveryRules = $0
-                }
-            ))
-            BackupRestoreSection(vm: vm)
-            Section {
-                HStack {
-                    Button("Save") {
-                        Task {
-                            if let d = draft {
-                                await vm.saveSettings(d)
-                                saved = true
-                            }
-                        }
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    Button("Revert") { draft = nil; saved = false }
-                    if saved {
-                        Text("Saved").foregroundStyle(.secondary).font(.caption)
                     }
                 }
             }

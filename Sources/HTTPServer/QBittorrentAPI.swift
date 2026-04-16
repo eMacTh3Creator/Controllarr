@@ -312,10 +312,27 @@ public enum QBittorrentAPI {
                 return Response(status: .badRequest)
             }
             let save = form["savePath"] ?? ""
-            if let existing = await services.store.category(named: name) {
+            // Honor an optional `moveFiles` form override — falls back to the
+            // persisted `categoryChangeMove` policy (ask/always/never).
+            let settings = await services.store.settings()
+            let existing = await services.store.category(named: name)
+            let pathChanged = (existing?.savePath ?? "") != save && !save.isEmpty
+            let override = form["moveFiles"].map { $0.lowercased() == "true" }
+            let shouldMove: Bool = {
+                if let override { return override }
+                switch settings.categoryChangeMove {
+                case .always: return pathChanged
+                case .never:  return false
+                case .ask:    return false      // API default when unspecified
+                }
+            }()
+            if let existing {
                 var updated = existing
                 updated.savePath = save
                 await services.store.upsertCategory(updated)
+            }
+            if pathChanged && shouldMove {
+                _ = await services.engine.moveCategoryMembers(name, to: save)
             }
             return plainText("")
         }
@@ -331,8 +348,24 @@ public enum QBittorrentAPI {
         router.post("/api/v2/torrents/setCategory") { request, _ -> Response in
             let form = FormParser.parse(try await request.body.collect(upTo: 64 * 1024))
             let category = form["category"]
+            // Honor optional per-request `moveFiles` form field; otherwise
+            // defer to the persisted `categoryChangeMove` policy.
+            let settings = await services.store.settings()
+            let override = form["moveFiles"].map { $0.lowercased() == "true" }
+            let shouldMove: Bool = {
+                if let override { return override }
+                switch settings.categoryChangeMove {
+                case .always: return true
+                case .never:  return false
+                case .ask:    return false      // WebAPI default when unspecified
+                }
+            }()
             for h in hashList(from: form["hashes"]) {
-                await services.engine.setCategory(category, for: h)
+                _ = await services.engine.setCategory(
+                    category,
+                    for: h,
+                    moveFiles: shouldMove
+                )
                 await services.store.noteCategoryForHash(h, category: category)
             }
             return plainText("")

@@ -249,10 +249,52 @@ final class RuntimeViewModel {
         await refreshAll()
     }
 
+    /// Assign (or clear) a torrent's category and optionally move its files
+    /// to the destination category's save path. Returns whether the storage
+    /// move was kicked off and the resolved target path (for UI feedback).
+    @discardableResult
+    func changeCategory(
+        hash: String,
+        to category: String?,
+        moveFiles: Bool
+    ) async -> (moved: Bool, targetPath: String?) {
+        guard let runtime else { return (false, nil) }
+        let result = await runtime.engine.setCategory(category, for: hash, moveFiles: moveFiles)
+        await runtime.store.noteCategoryForHash(hash, category: category)
+        await refreshFast()
+        return (result.moved, result.targetPath)
+    }
+
+    /// Edit a category's save path and, if requested, move every torrent
+    /// tagged with that category to the new location. Returns the list of
+    /// info hashes that were actually moved.
+    @discardableResult
+    func applyCategoryPathChange(
+        category: String,
+        newPath: String,
+        moveFiles: Bool
+    ) async -> [String] {
+        guard let runtime else { return [] }
+        var updated = await runtime.store.category(named: category)
+            ?? Persistence.Category(name: category, savePath: newPath)
+        updated.savePath = newPath
+        await runtime.store.upsertCategory(updated)
+        var moved: [String] = []
+        if moveFiles {
+            moved = await runtime.engine.moveCategoryMembers(category, to: newPath)
+        }
+        await refreshAll()
+        return moved
+    }
+
     func saveSettings(_ newSettings: Persistence.Settings) async {
         guard let runtime else { return }
         await runtime.store.replaceSettings(newSettings)
+        await runtime.applyNetworkSettings()
         await refreshAll()
+        if let delegate = NSApp.delegate as? AppDelegate {
+            delegate.applyInterfacePreferences()
+        }
     }
 
     func clearHealthIssue(hash: String) async {

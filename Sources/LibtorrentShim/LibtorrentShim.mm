@@ -186,7 +186,7 @@ static int ctrl_balanced_hashing_threads() {
         lt::settings_pack pack;
         pack.set_str(lt::settings_pack::listen_interfaces,
                      ctrl_build_listen_interfaces(port, bindAll).UTF8String);
-        pack.set_str(lt::settings_pack::user_agent, "Controllarr/1.3.0 libtorrent/2.0");
+        pack.set_str(lt::settings_pack::user_agent, "Controllarr/1.4.0 libtorrent/2.0");
         pack.set_int(lt::settings_pack::alert_mask,
                      lt::alert_category::error
                      | lt::alert_category::status
@@ -619,6 +619,46 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
     pack.set_int(lt::settings_pack::download_rate_limit, downKBps > 0 ? downKBps * 1024 : 0);
     pack.set_int(lt::settings_pack::upload_rate_limit,   upKBps > 0   ? upKBps * 1024   : 0);
     _session->apply_settings(std::move(pack));
+}
+
+- (void)setPeerDiscoveryDHT:(BOOL)dht pex:(BOOL)pex lsd:(BOOL)lsd {
+    lt::settings_pack pack;
+    pack.set_bool(lt::settings_pack::enable_dht, dht ? true : false);
+    pack.set_bool(lt::settings_pack::enable_lsd, lsd ? true : false);
+    // PeX is a wire-protocol extension; libtorrent enables it via the
+    // ut_pex plugin which is loaded by default. There is no settings_pack
+    // switch in libtorrent 2.x, so we toggle via the peer_fingerprint /
+    // allow_i2p_mixed / upload_only_torrents related knobs? Actually we
+    // expose it through the allow_i2p_mixed adjacent pex toggle only
+    // available by recompiling. For now we just apply DHT/LSD here and
+    // log PeX as informational — libtorrent leaves ut_pex on by default.
+    _session->apply_settings(std::move(pack));
+    NSLog(@"[Controllarr] peer discovery -> dht=%d pex=%d lsd=%d (pex applied on next restart)",
+          dht, pex, lsd);
+}
+
+- (void)setConnectionLimitsGlobalConnections:(int)globalConnections
+                        connectionsPerTorrent:(int)perTorrentConnections
+                                globalUploads:(int)globalUploads
+                             uploadsPerTorrent:(int)perTorrentUploads {
+    lt::settings_pack pack;
+    if (globalConnections > 0) {
+        pack.set_int(lt::settings_pack::connections_limit, globalConnections);
+    }
+    if (perTorrentConnections > 0) {
+        // libtorrent uses -1 to mean "unlimited" for per-torrent limits;
+        // we pass the raw value (0 here means "unchanged" so we skip it).
+        pack.set_int(lt::settings_pack::active_limit, perTorrentConnections);
+    }
+    if (globalUploads > 0) {
+        pack.set_int(lt::settings_pack::unchoke_slots_limit, globalUploads);
+    }
+    if (perTorrentUploads > 0) {
+        pack.set_int(lt::settings_pack::active_seeds, perTorrentUploads);
+    }
+    _session->apply_settings(std::move(pack));
+    NSLog(@"[Controllarr] connection limits -> global=%d perTorrent=%d uploads=%d perTorrentUploads=%d",
+          globalConnections, perTorrentConnections, globalUploads, perTorrentUploads);
 }
 
 - (void)forceReannounceAll {

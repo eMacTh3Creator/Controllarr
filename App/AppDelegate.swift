@@ -28,6 +28,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.regular)
             installStatusItem()
             startStatusRefresh()
+            // Observe the runtime's settings once it finishes booting so we
+            // can honor menu-bar preferences (hide status item, minimize on
+            // launch, close-to-menu-bar).
+            Task { @MainActor in
+                while RuntimeViewModel.shared.isBooting {
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                }
+                self.applyInterfacePreferences()
+            }
+        }
+    }
+
+    /// Pull the current `UIPreferences` off the runtime and reconcile the
+    /// live menu-bar state. Called on boot completion and every time the
+    /// operator saves Settings — wired through `RuntimeViewModel.saveSettings`.
+    func applyInterfacePreferences() {
+        let prefs = RuntimeViewModel.shared.settings.uiPreferences
+
+        // Menu-bar toggle — install or tear down the status item.
+        if prefs.menuBarEnabled {
+            if statusItem == nil { installStatusItem() }
+        } else {
+            if let item = statusItem {
+                NSStatusBar.system.removeStatusItem(item)
+                statusItem = nil
+                statusLineItem = nil
+            }
+        }
+
+        // Start minimized — close the main window if requested and if the
+        // menu-bar icon is the user's entry point back to the UI.
+        if prefs.menuBarEnabled && prefs.startMinimized && !didHandleStartMinimized {
+            didHandleStartMinimized = true
+            for window in NSApp.windows where window.canBecomeMain {
+                window.close()
+            }
+        }
+    }
+
+    private var didHandleStartMinimized: Bool = false
+
+    /// When `closeToMenuBar` is on and the menu-bar icon is available,
+    /// closing the main window shouldn't quit the app.
+    nonisolated func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        MainActor.assumeIsolated {
+            let prefs = RuntimeViewModel.shared.settings.uiPreferences
+            return !(prefs.menuBarEnabled && prefs.closeToMenuBar)
+        }
+    }
+
+    /// Reopening the dock icon (or clicking Show Window from the menu bar)
+    /// should bring the window back.
+    nonisolated func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        MainActor.assumeIsolated {
+            if !flag {
+                for window in NSApp.windows where window.canBecomeMain {
+                    window.makeKeyAndOrderFront(nil)
+                    return false
+                }
+            }
+            return true
         }
     }
 

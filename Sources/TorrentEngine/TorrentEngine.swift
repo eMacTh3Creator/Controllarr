@@ -332,6 +332,51 @@ public actor TorrentEngine {
         invalidateSnapshotCache()
     }
 
+    /// Assign a category to a torrent and optionally move its on-disk files
+    /// to the category's save path. Returns true if the category was applied;
+    /// `moved` is true when a move_storage was kicked off.
+    @discardableResult
+    public func setCategory(
+        _ category: String?,
+        for infoHash: String,
+        moveFiles: Bool
+    ) async -> (applied: Bool, moved: Bool, targetPath: String?) {
+        setCategory(category, for: infoHash)
+        guard moveFiles, let category,
+              let target = await resolver(category),
+              !target.isEmpty else {
+            return (true, false, nil)
+        }
+        // Skip if the torrent's current save path already matches.
+        if let current = stats(for: infoHash)?.savePath, current == target {
+            return (true, false, target)
+        }
+        try? FileManager.default.createDirectory(
+            atPath: target, withIntermediateDirectories: true
+        )
+        let ok = move(infoHash: infoHash, to: URL(fileURLWithPath: target))
+        return (true, ok, target)
+    }
+
+    /// Move every torrent currently tagged with the given category to the
+    /// specified new path. Used when a category's save path is edited and
+    /// the operator chooses to reorganize the library.
+    @discardableResult
+    public func moveCategoryMembers(_ category: String, to newPath: String) async -> [String] {
+        try? FileManager.default.createDirectory(
+            atPath: newPath, withIntermediateDirectories: true
+        )
+        let targetURL = URL(fileURLWithPath: newPath)
+        var moved: [String] = []
+        for torrent in pollStats() where categoryByHash[torrent.infoHash] == category {
+            guard torrent.savePath != newPath else { continue }
+            if move(infoHash: torrent.infoHash, to: targetURL) {
+                moved.append(torrent.infoHash)
+            }
+        }
+        return moved
+    }
+
     /// Record a category's blocked extension list so the engine can
     /// apply libtorrent file priorities when metadata arrives.
     public func registerBlockedExtensions(_ extensions: [String], forCategory category: String) {
@@ -529,6 +574,26 @@ public actor TorrentEngine {
     public func setRateLimits(downloadKBps: Int?, uploadKBps: Int?) {
         session.setRateLimitsDownloadKBps(Int32(downloadKBps ?? 0), uploadKBps: Int32(uploadKBps ?? 0))
         invalidateSnapshotCache()
+    }
+
+    /// Toggle DHT / PeX / LSD peer discovery. PeX is applied on next restart.
+    public func setPeerDiscovery(dht: Bool, pex: Bool, lsd: Bool) {
+        session.setPeerDiscoveryDHT(dht, pex: pex, lsd: lsd)
+    }
+
+    /// Apply connection-count ceilings. Pass nil/0 to leave the current value.
+    public func setConnectionLimits(
+        globalConnections: Int?,
+        perTorrentConnections: Int?,
+        globalUploads: Int?,
+        perTorrentUploads: Int?
+    ) {
+        session.setConnectionLimitsGlobalConnections(
+            Int32(globalConnections ?? 0),
+            connectionsPerTorrent: Int32(perTorrentConnections ?? 0),
+            globalUploads: Int32(globalUploads ?? 0),
+            uploadsPerTorrent: Int32(perTorrentUploads ?? 0)
+        )
     }
 
     public func forceReannounceAll() {

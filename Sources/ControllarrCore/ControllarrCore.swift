@@ -130,6 +130,7 @@ public actor ControllarrRuntime {
     }
 
     public func start() async throws {
+        await applyNetworkSettings()
         await portWatcher.start()
         await bandwidthScheduler.start()
         await diskSpaceMonitor.start()
@@ -137,6 +138,24 @@ public actor ControllarrRuntime {
         try await httpServer.start()
         startTickLoop()
         logger.info("runtime", "Controllarr runtime started")
+    }
+
+    /// Push the persisted peer-discovery + connection-limit settings into
+    /// libtorrent. Safe to call repeatedly — used on boot and whenever the
+    /// operator saves the settings form.
+    public func applyNetworkSettings() async {
+        let settings = await store.settings()
+        await engine.setPeerDiscovery(
+            dht: settings.peerDiscovery.dhtEnabled,
+            pex: settings.peerDiscovery.pexEnabled,
+            lsd: settings.peerDiscovery.lsdEnabled
+        )
+        await engine.setConnectionLimits(
+            globalConnections: settings.connectionLimits.globalMaxConnections,
+            perTorrentConnections: settings.connectionLimits.maxConnectionsPerTorrent,
+            globalUploads: settings.connectionLimits.globalMaxUploads,
+            perTorrentUploads: settings.connectionLimits.maxUploadsPerTorrent
+        )
     }
 
     public func shutdown() async {

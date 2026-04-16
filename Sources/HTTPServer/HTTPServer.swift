@@ -88,6 +88,8 @@ public actor HTTPServer {
         let router = Router()
         router.add(middleware: LogRequestsMiddleware())
         router.add(middleware: CORSMiddleware())
+        router.add(middleware: SecurityHeadersMiddleware(store: services.store))
+        router.add(middleware: IPAllowlistMiddleware(store: services.store))
 
         // qBittorrent Web API v2 compat surface.
         let sessions = QBittorrentAPI.install(
@@ -131,7 +133,7 @@ public actor HTTPServer {
            !version.isEmpty {
             return "Controllarr/\(version)"
         }
-        return "Controllarr/1.3.0"
+        return "Controllarr/1.4.0"
     }
 }
 

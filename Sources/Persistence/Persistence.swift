@@ -38,6 +38,18 @@ public enum RecoveryTrigger: String, Codable, Sendable, CaseIterable {
     case diskPressure = "disk_pressure"
 }
 
+/// What to do when a torrent's category changes to one with a different save
+/// path, or when a category's save path is edited while it has members.
+public enum CategoryMovePolicy: String, Codable, Sendable, CaseIterable {
+    /// Ask the user (native UI). WebUI treats this as "never" unless the
+    /// request explicitly opts in via `moveFiles=true`.
+    case ask
+    /// Always move files when paths differ. No prompt.
+    case always
+    /// Never move files automatically. Operator must trigger move manually.
+    case never
+}
+
 /// Action Controllarr should take when a recovery rule triggers.
 public enum RecoveryAction: String, Codable, Sendable, CaseIterable {
     case reannounce
@@ -127,6 +139,111 @@ public struct Category: Codable, Sendable, Equatable, Identifiable {
         self.maxRatio = try c.decodeIfPresent(Double.self, forKey: .maxRatio)
         self.maxSeedingTimeMinutes = try c.decodeIfPresent(Int.self, forKey: .maxSeedingTimeMinutes)
         self.dangerousPatterns = try c.decodeIfPresent([String].self, forKey: .dangerousPatterns) ?? []
+    }
+}
+
+/// Network-discovery toggles passed straight through to libtorrent.
+public struct PeerDiscovery: Codable, Sendable, Equatable {
+    /// Distributed Hash Table — trackerless peer discovery over Kademlia.
+    public var dhtEnabled: Bool
+    /// Peer Exchange — learn new peers from already-connected peers.
+    public var pexEnabled: Bool
+    /// Local Service Discovery — mDNS-style peer find on the LAN.
+    public var lsdEnabled: Bool
+
+    public init(dhtEnabled: Bool = true, pexEnabled: Bool = true, lsdEnabled: Bool = false) {
+        self.dhtEnabled = dhtEnabled
+        self.pexEnabled = pexEnabled
+        self.lsdEnabled = lsdEnabled
+    }
+}
+
+/// libtorrent connection-count ceilings. nil/0 = inherit libtorrent defaults.
+public struct ConnectionLimits: Codable, Sendable, Equatable {
+    /// Max peer connections session-wide.
+    public var globalMaxConnections: Int?
+    /// Max peer connections per torrent.
+    public var maxConnectionsPerTorrent: Int?
+    /// Max simultaneous outgoing "unchoked" uploads session-wide.
+    public var globalMaxUploads: Int?
+    /// Max unchoked uploads per torrent.
+    public var maxUploadsPerTorrent: Int?
+
+    public init(
+        globalMaxConnections: Int? = nil,
+        maxConnectionsPerTorrent: Int? = nil,
+        globalMaxUploads: Int? = nil,
+        maxUploadsPerTorrent: Int? = nil
+    ) {
+        self.globalMaxConnections = globalMaxConnections
+        self.maxConnectionsPerTorrent = maxConnectionsPerTorrent
+        self.globalMaxUploads = globalMaxUploads
+        self.maxUploadsPerTorrent = maxUploadsPerTorrent
+    }
+}
+
+/// WebUI remote-access allowlist. CIDR notation supported (e.g. "10.0.0.0/8",
+/// "192.168.1.0/24"). Bare IPs also accepted. Empty = allow all.
+public struct WebUISecurity: Codable, Sendable, Equatable {
+    /// When true, the IP allowlist is enforced. When false, WebUI is open to
+    /// any caller that reaches the bind address.
+    public var allowlistEnabled: Bool
+    public var allowedCIDRs: [String]
+    /// When true, adds `X-Frame-Options: DENY` and a restrictive
+    /// Content-Security-Policy so the WebUI cannot be framed.
+    public var clickjackingProtection: Bool
+    /// When true, POST/DELETE requests to `/api/controllarr/*` require an
+    /// `X-CSRF-Token` header matching the session's token.
+    public var csrfProtection: Bool
+
+    public init(
+        allowlistEnabled: Bool = false,
+        allowedCIDRs: [String] = [],
+        clickjackingProtection: Bool = true,
+        csrfProtection: Bool = false
+    ) {
+        self.allowlistEnabled = allowlistEnabled
+        self.allowedCIDRs = allowedCIDRs
+        self.clickjackingProtection = clickjackingProtection
+        self.csrfProtection = csrfProtection
+    }
+}
+
+/// Native app UI behavior (menu-bar integration, window defaults, table
+/// column widths, saved filters). Serializable so the Mac app and daemon
+/// can share preferences across restarts.
+public struct UIPreferences: Codable, Sendable, Equatable {
+    /// Show the menu-bar status item. When true, closing the window hides
+    /// it to the menu bar instead of quitting.
+    public var menuBarEnabled: Bool
+    /// Launch with the main window hidden (menu-bar only).
+    public var startMinimized: Bool
+    /// Close the main window to the menu bar instead of quitting.
+    public var closeToMenuBar: Bool
+    /// Saved torrent-table column widths. Keyed by column id.
+    public var torrentColumnWidths: [String: Double]
+    /// Persisted torrent sort key and direction. Nil = name ascending.
+    public var torrentSortKey: String?
+    public var torrentSortAscending: Bool
+    /// Last-selected torrent status filter.
+    public var torrentStatusFilter: String
+
+    public init(
+        menuBarEnabled: Bool = true,
+        startMinimized: Bool = false,
+        closeToMenuBar: Bool = false,
+        torrentColumnWidths: [String: Double] = [:],
+        torrentSortKey: String? = nil,
+        torrentSortAscending: Bool = true,
+        torrentStatusFilter: String = "all"
+    ) {
+        self.menuBarEnabled = menuBarEnabled
+        self.startMinimized = startMinimized
+        self.closeToMenuBar = closeToMenuBar
+        self.torrentColumnWidths = torrentColumnWidths
+        self.torrentSortKey = torrentSortKey
+        self.torrentSortAscending = torrentSortAscending
+        self.torrentStatusFilter = torrentStatusFilter
     }
 }
 
@@ -280,6 +397,30 @@ public struct Settings: Codable, Sendable, Equatable {
     /// a re-search. Avoids false positives on slow starts.
     public var arrReSearchAfterHours: Int
 
+    // Peer discovery ------------------------------------------------------------
+
+    /// DHT/PeX/LSD toggles applied to libtorrent on startup and whenever
+    /// settings are saved.
+    public var peerDiscovery: PeerDiscovery
+
+    // Connection limits --------------------------------------------------------
+
+    public var connectionLimits: ConnectionLimits
+
+    // WebUI security ----------------------------------------------------------
+
+    public var webUISecurity: WebUISecurity
+
+    // UI preferences ----------------------------------------------------------
+
+    public var uiPreferences: UIPreferences
+
+    /// When the user switches a torrent's category to one with a different
+    /// save path, should Controllarr move the files automatically?
+    /// "ask" = confirm (native UI) / no-op (WebUI & *arr); "always" = always
+    /// move; "never" = never move.
+    public var categoryChangeMove: CategoryMovePolicy
+
     public static func defaults(homeDir: URL) -> Settings {
         Settings(
             listenPortRangeStart: 49152,
@@ -308,7 +449,12 @@ public struct Settings: Codable, Sendable, Equatable {
             diskSpaceMinimumGB: nil,
             diskSpaceMonitorPath: "",
             arrEndpoints: [],
-            arrReSearchAfterHours: 6
+            arrReSearchAfterHours: 6,
+            peerDiscovery: PeerDiscovery(),
+            connectionLimits: ConnectionLimits(),
+            webUISecurity: WebUISecurity(),
+            uiPreferences: UIPreferences(),
+            categoryChangeMove: .ask
         )
     }
 
@@ -339,6 +485,11 @@ public struct Settings: Codable, Sendable, Equatable {
         self.diskSpaceMonitorPath = try c.decodeIfPresent(String.self, forKey: .diskSpaceMonitorPath) ?? ""
         self.arrEndpoints = try c.decodeIfPresent([ArrEndpoint].self, forKey: .arrEndpoints) ?? []
         self.arrReSearchAfterHours = try c.decodeIfPresent(Int.self, forKey: .arrReSearchAfterHours) ?? 6
+        self.peerDiscovery = try c.decodeIfPresent(PeerDiscovery.self, forKey: .peerDiscovery) ?? PeerDiscovery()
+        self.connectionLimits = try c.decodeIfPresent(ConnectionLimits.self, forKey: .connectionLimits) ?? ConnectionLimits()
+        self.webUISecurity = try c.decodeIfPresent(WebUISecurity.self, forKey: .webUISecurity) ?? WebUISecurity()
+        self.uiPreferences = try c.decodeIfPresent(UIPreferences.self, forKey: .uiPreferences) ?? UIPreferences()
+        self.categoryChangeMove = try c.decodeIfPresent(CategoryMovePolicy.self, forKey: .categoryChangeMove) ?? .ask
     }
 
     public init(
@@ -366,7 +517,12 @@ public struct Settings: Codable, Sendable, Equatable {
         diskSpaceMinimumGB: Int? = nil,
         diskSpaceMonitorPath: String = "",
         arrEndpoints: [ArrEndpoint] = [],
-        arrReSearchAfterHours: Int = 6
+        arrReSearchAfterHours: Int = 6,
+        peerDiscovery: PeerDiscovery = PeerDiscovery(),
+        connectionLimits: ConnectionLimits = ConnectionLimits(),
+        webUISecurity: WebUISecurity = WebUISecurity(),
+        uiPreferences: UIPreferences = UIPreferences(),
+        categoryChangeMove: CategoryMovePolicy = .ask
     ) {
         self.listenPortRangeStart = listenPortRangeStart
         self.listenPortRangeEnd = listenPortRangeEnd
@@ -393,6 +549,11 @@ public struct Settings: Codable, Sendable, Equatable {
         self.diskSpaceMonitorPath = diskSpaceMonitorPath
         self.arrEndpoints = arrEndpoints
         self.arrReSearchAfterHours = arrReSearchAfterHours
+        self.peerDiscovery = peerDiscovery
+        self.connectionLimits = connectionLimits
+        self.webUISecurity = webUISecurity
+        self.uiPreferences = uiPreferences
+        self.categoryChangeMove = categoryChangeMove
     }
 }
 

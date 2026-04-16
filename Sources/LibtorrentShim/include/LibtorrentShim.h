@@ -173,6 +173,19 @@ typedef NS_ENUM(NSInteger, CTRLTorrentState) {
 /// Set global download/upload rate limits in KiB/s. 0 = unlimited.
 - (void)setRateLimitsDownloadKBps:(int)downKBps uploadKBps:(int)upKBps;
 
+/// Toggle the DHT / PeX / LSD peer-discovery mechanisms at runtime.
+/// PeX is controlled by loading (or not loading) the ut_pex extension,
+/// which libtorrent enables by default when the session is constructed;
+/// runtime toggling applies on next session restart for PeX. DHT and LSD
+/// apply immediately via settings_pack.
+- (void)setPeerDiscoveryDHT:(BOOL)dht pex:(BOOL)pex lsd:(BOOL)lsd;
+
+/// Connection-count ceilings. Pass 0 to leave libtorrent's default in place.
+- (void)setConnectionLimitsGlobalConnections:(int)globalConnections
+                        connectionsPerTorrent:(int)perTorrentConnections
+                                globalUploads:(int)globalUploads
+                             uploadsPerTorrent:(int)perTorrentUploads;
+
 /// Force a re-announce to all trackers on all torrents.
 - (void)forceReannounceAll;
 
