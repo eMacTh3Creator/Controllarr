@@ -198,6 +198,39 @@ public struct ConnectionLimits: Codable, Sendable, Equatable {
     }
 }
 
+/// libtorrent session-queueing controls. When `enabled` is false (default),
+/// Controllarr raises all active-* caps to 10,000 so libtorrent will never
+/// auto-pause a torrent for queue reasons (this is what most operators
+/// want — previous Controllarr versions inadvertently had queueing on,
+/// which showed up as "torrents randomly pausing themselves").
+///
+/// When `enabled` is true, libtorrent's queue system is active:
+/// auto-managed torrents past the caps sit in a queue, and libtorrent
+/// automatically promotes the next queued torrent whenever a running one
+/// finishes, is paused, or is removed. "Force Resume" bypasses this for
+/// specific torrents.
+public struct TorrentQueueing: Codable, Sendable, Equatable {
+    public var enabled: Bool
+    /// Max concurrently-downloading auto-managed torrents.
+    public var activeDownloads: Int
+    /// Max concurrently-seeding auto-managed torrents.
+    public var activeSeeds: Int
+    /// Overall cap on active (downloading + seeding + checking) torrents.
+    public var activeLimit: Int
+
+    public init(
+        enabled: Bool = false,
+        activeDownloads: Int = 3,
+        activeSeeds: Int = 5,
+        activeLimit: Int = 15
+    ) {
+        self.enabled = enabled
+        self.activeDownloads = activeDownloads
+        self.activeSeeds = activeSeeds
+        self.activeLimit = activeLimit
+    }
+}
+
 /// WebUI remote-access allowlist. CIDR notation supported (e.g. "10.0.0.0/8",
 /// "192.168.1.0/24"). Bare IPs also accepted. Empty = allow all.
 public struct WebUISecurity: Codable, Sendable, Equatable {
@@ -462,6 +495,10 @@ public struct Settings: Codable, Sendable, Equatable {
     /// already-running torrent by info-hash.
     public var duplicateTorrentPolicy: DuplicateTorrentPolicy
 
+    /// libtorrent session-queueing controls. Off by default — see
+    /// `TorrentQueueing` for details.
+    public var torrentQueueing: TorrentQueueing
+
     public static func defaults(homeDir: URL) -> Settings {
         Settings(
             listenPortRangeStart: 49152,
@@ -496,7 +533,8 @@ public struct Settings: Codable, Sendable, Equatable {
             webUISecurity: WebUISecurity(),
             uiPreferences: UIPreferences(),
             categoryChangeMove: .ask,
-            duplicateTorrentPolicy: .mergeTrackers
+            duplicateTorrentPolicy: .mergeTrackers,
+            torrentQueueing: TorrentQueueing()
         )
     }
 
@@ -533,6 +571,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.uiPreferences = try c.decodeIfPresent(UIPreferences.self, forKey: .uiPreferences) ?? UIPreferences()
         self.categoryChangeMove = try c.decodeIfPresent(CategoryMovePolicy.self, forKey: .categoryChangeMove) ?? .ask
         self.duplicateTorrentPolicy = try c.decodeIfPresent(DuplicateTorrentPolicy.self, forKey: .duplicateTorrentPolicy) ?? .mergeTrackers
+        self.torrentQueueing = try c.decodeIfPresent(TorrentQueueing.self, forKey: .torrentQueueing) ?? TorrentQueueing()
     }
 
     public init(
@@ -566,7 +605,8 @@ public struct Settings: Codable, Sendable, Equatable {
         webUISecurity: WebUISecurity = WebUISecurity(),
         uiPreferences: UIPreferences = UIPreferences(),
         categoryChangeMove: CategoryMovePolicy = .ask,
-        duplicateTorrentPolicy: DuplicateTorrentPolicy = .mergeTrackers
+        duplicateTorrentPolicy: DuplicateTorrentPolicy = .mergeTrackers,
+        torrentQueueing: TorrentQueueing = TorrentQueueing()
     ) {
         self.listenPortRangeStart = listenPortRangeStart
         self.listenPortRangeEnd = listenPortRangeEnd
@@ -599,6 +639,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.uiPreferences = uiPreferences
         self.categoryChangeMove = categoryChangeMove
         self.duplicateTorrentPolicy = duplicateTorrentPolicy
+        self.torrentQueueing = torrentQueueing
     }
 }
 

@@ -304,6 +304,22 @@ public enum QBittorrentAPI {
             }
             return plainText("")
         }
+        // qBittorrent's "Force Resume" / "Force Start" — `value=true`
+        // takes a torrent out of the auto-managed pool so libtorrent's
+        // queue system cannot silently re-pause it; `value=false` puts it
+        // back into the queue (equivalent to a normal resume).
+        router.post("/api/v2/torrents/setForceStart") { request, _ -> Response in
+            let form = FormParser.parse(try await request.body.collect(upTo: 64 * 1024))
+            let force = (form["value"]?.lowercased() == "true")
+            for h in hashList(from: form["hashes"]) {
+                if force {
+                    _ = await services.engine.forceResume(infoHash: h)
+                } else {
+                    _ = await services.engine.resume(infoHash: h)
+                }
+            }
+            return plainText("")
+        }
         router.post("/api/v2/torrents/delete") { request, _ -> Response in
             let form = FormParser.parse(try await request.body.collect(upTo: 64 * 1024))
             let deleteFiles = (form["deleteFiles"]?.lowercased() == "true")

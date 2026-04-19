@@ -230,7 +230,7 @@ static int ctrl_balanced_hashing_threads() {
         lt::settings_pack pack;
         pack.set_str(lt::settings_pack::listen_interfaces,
                      ctrl_build_listen_interfaces(port, bindAll).UTF8String);
-        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.1.0 libtorrent/2.0");
+        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.1.1 libtorrent/2.0");
         pack.set_int(lt::settings_pack::alert_mask,
                      lt::alert_category::error
                      | lt::alert_category::status
@@ -245,6 +245,20 @@ static int ctrl_balanced_hashing_threads() {
         pack.set_bool(lt::settings_pack::enable_natpmp, true);
         pack.set_bool(lt::settings_pack::enable_dht, true);
         pack.set_bool(lt::settings_pack::enable_lsd, false); // too noisy on mac
+
+        // Default to queueing OFF. libtorrent's built-in queueing defaults
+        // (active_downloads=3 / active_seeds=5 / active_limit=15) silently
+        // pause auto-managed torrents once the counts are exceeded, which
+        // users perceive as "torrents randomly pausing themselves". Operators
+        // can re-enable libtorrent queueing from Settings if they actually
+        // want the queue-and-throttle behavior.
+        pack.set_int(lt::settings_pack::active_downloads, 10000);
+        pack.set_int(lt::settings_pack::active_seeds, 10000);
+        pack.set_int(lt::settings_pack::active_checking, 10000);
+        pack.set_int(lt::settings_pack::active_dht_limit, 10000);
+        pack.set_int(lt::settings_pack::active_tracker_limit, 10000);
+        pack.set_int(lt::settings_pack::active_lsd_limit, 10000);
+        pack.set_int(lt::settings_pack::active_limit, 10000);
 
         _session = std::make_unique<lt::session>(pack);
         NSLog(
@@ -347,6 +361,19 @@ static int ctrl_balanced_hashing_threads() {
     auto h = [self handleFor:infoHash];
     if (!h.is_valid()) return NO;
     h.set_flags(lt::torrent_flags::auto_managed);
+    h.resume();
+    return YES;
+}
+
+- (BOOL)forceResumeTorrent:(NSString *)infoHash {
+    // "Force Download" / "Force Resume" in qBittorrent terms: clear both
+    // the paused flag AND auto_managed so the session queue system can't
+    // silently re-pause this torrent when active_downloads / active_seeds
+    // / active_limit are exceeded. This is the right fix when a user
+    // sees torrents go paused on their own after a while.
+    auto h = [self handleFor:infoHash];
+    if (!h.is_valid()) return NO;
+    h.unset_flags(lt::torrent_flags::auto_managed);
     h.resume();
     return YES;
 }
@@ -801,24 +828,67 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
                         connectionsPerTorrent:(int)perTorrentConnections
                                 globalUploads:(int)globalUploads
                              uploadsPerTorrent:(int)perTorrentUploads {
+    // Session-wide caps go into settings_pack. Per-torrent caps are applied
+    // on every currently-running torrent_handle (and re-applied at add-time
+    // by add-helpers if we wanted that; libtorrent clamps per-torrent values
+    // against these on every connection attempt).
+    //
+    // IMPORTANT: we intentionally do NOT touch active_limit / active_seeds /
+    // active_downloads here. Those knobs control the queueing system, not
+    // connection counts — writing a per-torrent connection value into them
+    // (which was the pre-2.1.1 bug) caused libtorrent to auto-pause any
+    // torrent past the Nth one, which users saw as "random pausing".
     lt::settings_pack pack;
     if (globalConnections > 0) {
         pack.set_int(lt::settings_pack::connections_limit, globalConnections);
     }
-    if (perTorrentConnections > 0) {
-        // libtorrent uses -1 to mean "unlimited" for per-torrent limits;
-        // we pass the raw value (0 here means "unchanged" so we skip it).
-        pack.set_int(lt::settings_pack::active_limit, perTorrentConnections);
-    }
     if (globalUploads > 0) {
         pack.set_int(lt::settings_pack::unchoke_slots_limit, globalUploads);
     }
-    if (perTorrentUploads > 0) {
-        pack.set_int(lt::settings_pack::active_seeds, perTorrentUploads);
-    }
     _session->apply_settings(std::move(pack));
+
+    if (perTorrentConnections > 0 || perTorrentUploads > 0) {
+        for (auto const &h : _session->get_torrents()) {
+            if (!h.is_valid()) continue;
+            try {
+                if (perTorrentConnections > 0) {
+                    h.set_max_connections(perTorrentConnections);
+                }
+                if (perTorrentUploads > 0) {
+                    h.set_max_uploads(perTorrentUploads);
+                }
+            } catch (...) {
+                // Torrent may be transitioning; skip silently.
+            }
+        }
+    }
+
     NSLog(@"[Controllarr] connection limits -> global=%d perTorrent=%d uploads=%d perTorrentUploads=%d",
           globalConnections, perTorrentConnections, globalUploads, perTorrentUploads);
+}
+
+- (void)setQueueingEnabled:(BOOL)enabled
+           activeDownloads:(int)activeDownloads
+               activeSeeds:(int)activeSeeds
+               activeLimit:(int)activeLimit {
+    // When enabled is NO we effectively uncap queueing (10k across the
+    // board) so libtorrent never auto-pauses a torrent for queueing reasons.
+    // When enabled is YES we honor the operator-supplied caps (each one 0
+    // falls back to a sane qBittorrent-like default).
+    lt::settings_pack pack;
+    int d = enabled ? (activeDownloads > 0 ? activeDownloads : 3)  : 10000;
+    int s = enabled ? (activeSeeds     > 0 ? activeSeeds     : 5)  : 10000;
+    int a = enabled ? (activeLimit     > 0 ? activeLimit     : 15) : 10000;
+    pack.set_int(lt::settings_pack::active_downloads,    d);
+    pack.set_int(lt::settings_pack::active_seeds,        s);
+    pack.set_int(lt::settings_pack::active_limit,        a);
+    pack.set_int(lt::settings_pack::active_checking,     enabled ? a : 10000);
+    pack.set_int(lt::settings_pack::active_dht_limit,    enabled ? a : 10000);
+    pack.set_int(lt::settings_pack::active_tracker_limit,enabled ? a : 10000);
+    pack.set_int(lt::settings_pack::active_lsd_limit,    enabled ? a : 10000);
+    _session->apply_settings(std::move(pack));
+    NSLog(@"[Controllarr] queueing -> enabled=%d activeDown=%d activeSeed=%d activeLimit=%d",
+          enabled, d, s, a);
 }
 
 - (void)forceReannounceAll {

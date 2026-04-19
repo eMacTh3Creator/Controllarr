@@ -156,6 +156,12 @@ public actor ControllarrRuntime {
             globalUploads: settings.connectionLimits.globalMaxUploads,
             perTorrentUploads: settings.connectionLimits.maxUploadsPerTorrent
         )
+        await engine.applyQueueing(
+            enabled: settings.torrentQueueing.enabled,
+            activeDownloads: settings.torrentQueueing.activeDownloads,
+            activeSeeds: settings.torrentQueueing.activeSeeds,
+            activeLimit: settings.torrentQueueing.activeLimit
+        )
     }
 
     public func shutdown() async {

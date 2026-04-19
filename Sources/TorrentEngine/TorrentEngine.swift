@@ -505,6 +505,29 @@ public actor TorrentEngine {
         return didResume
     }
 
+    /// "Force Download" / "Force Resume" — resume a torrent and take it out
+    /// of the auto-managed pool so libtorrent's queue system can never
+    /// silently re-pause it. This is what you want for a torrent the user
+    /// explicitly clicked Force Resume on.
+    @discardableResult
+    public func forceResume(infoHash: String) -> Bool {
+        let didResume = session.forceResumeTorrent(infoHash)
+        if didResume { invalidateSnapshotCache() }
+        return didResume
+    }
+
+    /// Apply the operator's torrent-queueing configuration (from Settings)
+    /// to the libtorrent session. When `enabled` is false the active-* caps
+    /// are raised to 10,000 so queueing never auto-pauses anything.
+    public func applyQueueing(enabled: Bool, activeDownloads: Int, activeSeeds: Int, activeLimit: Int) {
+        session.setQueueingEnabled(
+            enabled,
+            activeDownloads: Int32(activeDownloads),
+            activeSeeds: Int32(activeSeeds),
+            activeLimit: Int32(activeLimit)
+        )
+    }
+
     @discardableResult
     public func remove(infoHash: String, deleteFiles: Bool) -> Bool {
         categoryByHash.removeValue(forKey: infoHash)

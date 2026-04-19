@@ -134,7 +134,15 @@ typedef NS_ENUM(NSInteger, CTRLTorrentState) {
 
 /// Pause a torrent by info hash (hex, lowercase). Returns NO if not found.
 - (BOOL)pauseTorrent:(NSString *)infoHash;
+/// Resume a torrent into the auto-managed pool. If libtorrent queueing is
+/// enabled, the torrent participates in the queue (libtorrent will promote
+/// it to running when an active slot opens up).
 - (BOOL)resumeTorrent:(NSString *)infoHash;
+/// "Force Download" / "Force Resume" — resume a torrent and remove it from
+/// the auto-managed pool so the queue system can never silently re-pause it.
+/// Use when the user explicitly wants this torrent to run regardless of
+/// queue caps.
+- (BOOL)forceResumeTorrent:(NSString *)infoHash;
 
 /// Remove a torrent by info hash. If `deleteFiles` is YES, the on-disk
 /// files are removed too. Returns NO if not found.
@@ -219,6 +227,18 @@ typedef NS_ENUM(NSInteger, CTRLTorrentState) {
                         connectionsPerTorrent:(int)perTorrentConnections
                                 globalUploads:(int)globalUploads
                              uploadsPerTorrent:(int)perTorrentUploads;
+
+/// Turn libtorrent's built-in torrent queueing on or off. When enabled,
+/// auto-managed torrents beyond the active caps get queued (paused
+/// automatically); libtorrent promotes the next queued one whenever a
+/// running torrent finishes/pauses/is removed. When disabled (default),
+/// all active caps are raised to 10,000 so queueing never triggers.
+/// Passing 0 for any cap falls back to the qBittorrent-like default
+/// (3 / 5 / 15).
+- (void)setQueueingEnabled:(BOOL)enabled
+           activeDownloads:(int)activeDownloads
+               activeSeeds:(int)activeSeeds
+               activeLimit:(int)activeLimit;
 
 /// Force a re-announce to all trackers on all torrents.
 - (void)forceReannounceAll;

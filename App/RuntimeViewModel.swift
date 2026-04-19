@@ -297,6 +297,14 @@ final class RuntimeViewModel {
         await refreshFast()
     }
 
+    /// "Force Resume" / "Force Download" — bypass libtorrent's queueing
+    /// system for this torrent so it runs regardless of active-* caps.
+    func forceResume(hash: String) async {
+        guard let runtime else { return }
+        _ = await runtime.engine.forceResume(infoHash: hash)
+        await refreshFast()
+    }
+
     func remove(hash: String, deleteFiles: Bool) async {
         guard let runtime else { return }
         _ = await runtime.engine.remove(infoHash: hash, deleteFiles: deleteFiles)

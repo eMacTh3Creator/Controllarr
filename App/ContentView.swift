@@ -323,6 +323,17 @@ struct TorrentsView: View {
                         Label("Pause", systemImage: "pause.fill")
                     }
                 }
+
+                // Force Resume (Force Download) — bypass libtorrent queueing
+                // for these torrents. Always offered so the operator can
+                // promote a queued torrent past the caps.
+                Button {
+                    Task {
+                        for t in selected { await vm.forceResume(hash: t.infoHash) }
+                    }
+                } label: {
+                    Label("Force Resume", systemImage: "bolt.fill")
+                }
             }
 
             Button {
@@ -1440,6 +1451,25 @@ struct SettingsView: View {
                 }
                 Text("Controls what happens when a magnet or .torrent is added whose info-hash matches a torrent already in the session. qBittorrent-style behavior is \u{201C}Merge new trackers\u{201D}. WebUI / *arr callers with \u{201C}Ask\u{201D} selected fall back to \u{201C}Merge\u{201D} since there is no interactive operator at that end.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Torrent queueing") {
+                Toggle("Enable libtorrent queueing", isOn: binding.torrentQueueing.enabled)
+                if binding.wrappedValue.torrentQueueing.enabled {
+                    Stepper(value: binding.torrentQueueing.activeDownloads, in: 1...10000) {
+                        Text("Max active downloads: \(binding.wrappedValue.torrentQueueing.activeDownloads)")
+                    }
+                    Stepper(value: binding.torrentQueueing.activeSeeds, in: 1...10000) {
+                        Text("Max active seeds: \(binding.wrappedValue.torrentQueueing.activeSeeds)")
+                    }
+                    Stepper(value: binding.torrentQueueing.activeLimit, in: 1...10000) {
+                        Text("Max active torrents overall: \(binding.wrappedValue.torrentQueueing.activeLimit)")
+                    }
+                    Text("Queued torrents resume automatically when a running torrent finishes, is paused, or is removed. To keep a specific torrent running past the caps, right-click it and choose Force Resume.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("Queueing is off: every torrent runs concurrently with no auto-pause. Enable only if you actually want libtorrent to cap the number of running torrents (this is what caused the \u{201C}torrents randomly pausing\u{201D} behavior in earlier builds).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)
