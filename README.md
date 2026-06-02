@@ -5,6 +5,7 @@
 <h1 align="center">Controllarr</h1>
 
 <p align="center">A native macOS BitTorrent client built for Sonarr / Radarr / Overseerr / Plex workflows.</p>
+<p align="center"><a href="https://emacth3creator.github.io/Controllarr/">Public website</a> · <a href="https://github.com/eMacTh3Creator/Controllarr/releases/latest">Download latest release</a> · <a href="docs/README.md">Documentation</a></p>
 
 Controllarr uses [libtorrent-rasterbar](https://www.libtorrent.org/) as its engine and wraps it in a Swift + SwiftUI desktop app with both a native macOS window and an embedded React web UI. It speaks the qBittorrent Web API so existing *arr apps can point at it with zero extra configuration.
 
@@ -60,6 +61,7 @@ If you want the detailed feature slate, recommended scope, and stretch goals, st
 ## Documentation
 
 - [docs/README.md](docs/README.md) — documentation index
+- [docs/index.html](docs/index.html) — GitHub Pages public landing page
 - [docs/OPERATIONS.md](docs/OPERATIONS.md) — headless daemon usage, backup/export/restore, recovery rules, post-processing retries, and disk-space operations
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — large-library behavior, runtime polling model, and scaling guidance for 1,000+ torrents
 - [docs/V1_5_ROADMAP.md](docs/V1_5_ROADMAP.md) — proposed big-ticket roadmap for the v1.5 release

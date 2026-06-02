@@ -5,6 +5,7 @@ This folder holds the higher-level product and planning docs that sit alongside 
 ## Start Here
 
 - [../README.md](../README.md) — product overview, feature summary, install/build instructions
+- [index.html](index.html) — public GitHub Pages launch page for Controllarr
 - [OPERATIONS.md](OPERATIONS.md) — headless daemon usage, backup/export/restore, recovery rules, post-processing retries, disk-space operations, and network diagnostics
 - [PERFORMANCE.md](PERFORMANCE.md) — large-library scaling notes, polling model, and tuning guidance for high torrent counts
 - [V1_5_ROADMAP.md](V1_5_ROADMAP.md) — big-ticket roadmap for a more ambitious v1.5 release
