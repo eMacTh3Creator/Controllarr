@@ -11,6 +11,12 @@ This folder holds the higher-level product and planning docs that sit alongside 
 
 ## Release Notes
 
+- [../RELEASE_NOTES_v2.1.2.md](../RELEASE_NOTES_v2.1.2.md) — large-library crash fix for bounded tracker/DHT/checking pressure
+- [../RELEASE_NOTES_v2.1.1.md](../RELEASE_NOTES_v2.1.1.md) — fixes random torrent auto-pausing, adds Force Resume, and makes libtorrent queueing configurable
+- [../RELEASE_NOTES_v2.1.0.md](../RELEASE_NOTES_v2.1.0.md) — duplicate detection, force recheck, context menus, multi-select operations, and stronger port-cycle reconnect
+- [../RELEASE_NOTES_v2.0.2.md](../RELEASE_NOTES_v2.0.2.md) — category filter dropdown and menu-bar reliability
+- [../RELEASE_NOTES_v2.0.1.md](../RELEASE_NOTES_v2.0.1.md) — resume sidecars and periodic state saves
+- [../RELEASE_NOTES_v2.0.0.md](../RELEASE_NOTES_v2.0.0.md) — peer discovery, connection limits, WebUI hardening, and Settings redesign
 - [../RELEASE_NOTES_v1.3.0.md](../RELEASE_NOTES_v1.3.0.md) — performance, caching, and large-library responsiveness improvements
 - [../RELEASE_NOTES_v0.2.0.md](../RELEASE_NOTES_v0.2.0.md) — native macOS window, richer WebUI, post-processing, seeding policy, health monitoring
 - [../RELEASE_NOTES_v0.3.0.md](../RELEASE_NOTES_v0.3.0.md) — torrent detail panes, tracker/peer visibility, bandwidth scheduler, Keychain groundwork

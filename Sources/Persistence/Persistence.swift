@@ -199,10 +199,10 @@ public struct ConnectionLimits: Codable, Sendable, Equatable {
 }
 
 /// libtorrent session-queueing controls. When `enabled` is false (default),
-/// Controllarr raises all active-* caps to 10,000 so libtorrent will never
-/// auto-pause a torrent for queue reasons (this is what most operators
-/// want — previous Controllarr versions inadvertently had queueing on,
-/// which showed up as "torrents randomly pausing themselves").
+/// Controllarr raises the torrent queue caps high enough that libtorrent
+/// will never auto-pause a torrent for queue reasons. The shim still keeps
+/// tracker/DHT/checking background limits bounded so large libraries do not
+/// create resolver storms.
 ///
 /// When `enabled` is true, libtorrent's queue system is active:
 /// auto-managed torrents past the caps sit in a queue, and libtorrent

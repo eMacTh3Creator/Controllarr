@@ -40,6 +40,12 @@ The browser UI used to fetch nearly every table on every 2-second refresh. It no
 
 The libtorrent session now uses a balanced `aio_threads` budget based on available cores, keeps hashing threads conservative, and increases the alert queue size to reduce alert drops under load. The intention is better throughput and less backpressure, not aggressive maximum-resource operation.
 
+### Bounded Tracker/DHT Pressure
+
+v2.1.2 keeps torrent queueing off by default so libtorrent does not auto-pause torrents, but tracker, DHT, LSD, and checking work are still capped internally. This prevents large sessions from launching hundreds of DNS/tracker resolver jobs at once while preserving the "all torrents may stay running" behavior.
+
+Mass reannounce operations are also staggered in batches so a port cycle does not ask every tracker for every torrent to resolve immediately.
+
 ## Practical Guidance
 
 If you want the best results on large libraries:

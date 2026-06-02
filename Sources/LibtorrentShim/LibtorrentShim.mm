@@ -163,6 +163,34 @@ static int ctrl_balanced_hashing_threads() {
     return cores >= 8 ? 2 : 1;
 }
 
+static int ctrl_unqueued_torrent_limit() {
+    return 10000;
+}
+
+static int ctrl_background_announce_limit() {
+    NSInteger cores = NSProcessInfo.processInfo.activeProcessorCount;
+    return (int)MAX(48, MIN(128, cores * 8));
+}
+
+static int ctrl_background_checking_limit() {
+    NSInteger cores = NSProcessInfo.processInfo.activeProcessorCount;
+    return (int)MAX(4, MIN(24, cores));
+}
+
+static int ctrl_limited_background_cap(BOOL queueingEnabled, int activeLimit) {
+    int backgroundLimit = ctrl_background_announce_limit();
+    if (!queueingEnabled) return backgroundLimit;
+    int requested = activeLimit > 0 ? activeLimit : 15;
+    return MAX(1, MIN(requested, backgroundLimit));
+}
+
+static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
+    int checkingLimit = ctrl_background_checking_limit();
+    if (!queueingEnabled) return checkingLimit;
+    int requested = activeLimit > 0 ? activeLimit : 15;
+    return MAX(1, MIN(requested, checkingLimit));
+}
+
 // MARK: - CTRLSession
 
 @implementation CTRLSession {
@@ -230,7 +258,7 @@ static int ctrl_balanced_hashing_threads() {
         lt::settings_pack pack;
         pack.set_str(lt::settings_pack::listen_interfaces,
                      ctrl_build_listen_interfaces(port, bindAll).UTF8String);
-        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.1.1 libtorrent/2.0");
+        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.1.2 libtorrent/2.0");
         pack.set_int(lt::settings_pack::alert_mask,
                      lt::alert_category::error
                      | lt::alert_category::status
@@ -246,27 +274,27 @@ static int ctrl_balanced_hashing_threads() {
         pack.set_bool(lt::settings_pack::enable_dht, true);
         pack.set_bool(lt::settings_pack::enable_lsd, false); // too noisy on mac
 
-        // Default to queueing OFF. libtorrent's built-in queueing defaults
-        // (active_downloads=3 / active_seeds=5 / active_limit=15) silently
-        // pause auto-managed torrents once the counts are exceeded, which
-        // users perceive as "torrents randomly pausing themselves". Operators
-        // can re-enable libtorrent queueing from Settings if they actually
-        // want the queue-and-throttle behavior.
-        pack.set_int(lt::settings_pack::active_downloads, 10000);
-        pack.set_int(lt::settings_pack::active_seeds, 10000);
-        pack.set_int(lt::settings_pack::active_checking, 10000);
-        pack.set_int(lt::settings_pack::active_dht_limit, 10000);
-        pack.set_int(lt::settings_pack::active_tracker_limit, 10000);
-        pack.set_int(lt::settings_pack::active_lsd_limit, 10000);
-        pack.set_int(lt::settings_pack::active_limit, 10000);
+        // Default to queueing OFF, while still capping background announce
+        // pressure. Raising active_limit avoids unwanted auto-pauses; keeping
+        // tracker/DHT/checking limits bounded prevents large libraries from
+        // firing hundreds of resolver jobs at once.
+        pack.set_int(lt::settings_pack::active_downloads, ctrl_unqueued_torrent_limit());
+        pack.set_int(lt::settings_pack::active_seeds, ctrl_unqueued_torrent_limit());
+        pack.set_int(lt::settings_pack::active_limit, ctrl_unqueued_torrent_limit());
+        pack.set_int(lt::settings_pack::active_checking, ctrl_background_checking_limit());
+        pack.set_int(lt::settings_pack::active_dht_limit, ctrl_background_announce_limit());
+        pack.set_int(lt::settings_pack::active_tracker_limit, ctrl_background_announce_limit());
+        pack.set_int(lt::settings_pack::active_lsd_limit, ctrl_background_announce_limit());
 
         _session = std::make_unique<lt::session>(pack);
         NSLog(
-            @"[Controllarr] session up: port=%u save=%@ aio_threads=%d hashing_threads=%d",
+            @"[Controllarr] session up: port=%u save=%@ aio_threads=%d hashing_threads=%d announce_limit=%d checking_limit=%d",
             port,
             _savePath,
             ctrl_balanced_aio_threads(),
-            ctrl_balanced_hashing_threads()
+            ctrl_balanced_hashing_threads(),
+            ctrl_background_announce_limit(),
+            ctrl_background_checking_limit()
         );
     }
     return self;
@@ -871,24 +899,26 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
            activeDownloads:(int)activeDownloads
                activeSeeds:(int)activeSeeds
                activeLimit:(int)activeLimit {
-    // When enabled is NO we effectively uncap queueing (10k across the
-    // board) so libtorrent never auto-pauses a torrent for queueing reasons.
-    // When enabled is YES we honor the operator-supplied caps (each one 0
-    // falls back to a sane qBittorrent-like default).
+    // Queue caps decide which torrents can run; background caps decide how
+    // many torrents may announce/check at once. Keep those separate so
+    // disabling queueing does not create a tracker/DNS storm on large
+    // libraries.
     lt::settings_pack pack;
-    int d = enabled ? (activeDownloads > 0 ? activeDownloads : 3)  : 10000;
-    int s = enabled ? (activeSeeds     > 0 ? activeSeeds     : 5)  : 10000;
-    int a = enabled ? (activeLimit     > 0 ? activeLimit     : 15) : 10000;
+    int d = enabled ? (activeDownloads > 0 ? activeDownloads : 3)  : ctrl_unqueued_torrent_limit();
+    int s = enabled ? (activeSeeds     > 0 ? activeSeeds     : 5)  : ctrl_unqueued_torrent_limit();
+    int a = enabled ? (activeLimit     > 0 ? activeLimit     : 15) : ctrl_unqueued_torrent_limit();
+    int checking = ctrl_limited_checking_cap(enabled, a);
+    int announce = ctrl_limited_background_cap(enabled, a);
     pack.set_int(lt::settings_pack::active_downloads,    d);
     pack.set_int(lt::settings_pack::active_seeds,        s);
     pack.set_int(lt::settings_pack::active_limit,        a);
-    pack.set_int(lt::settings_pack::active_checking,     enabled ? a : 10000);
-    pack.set_int(lt::settings_pack::active_dht_limit,    enabled ? a : 10000);
-    pack.set_int(lt::settings_pack::active_tracker_limit,enabled ? a : 10000);
-    pack.set_int(lt::settings_pack::active_lsd_limit,    enabled ? a : 10000);
+    pack.set_int(lt::settings_pack::active_checking,     checking);
+    pack.set_int(lt::settings_pack::active_dht_limit,    announce);
+    pack.set_int(lt::settings_pack::active_tracker_limit,announce);
+    pack.set_int(lt::settings_pack::active_lsd_limit,    announce);
     _session->apply_settings(std::move(pack));
-    NSLog(@"[Controllarr] queueing -> enabled=%d activeDown=%d activeSeed=%d activeLimit=%d",
-          enabled, d, s, a);
+    NSLog(@"[Controllarr] queueing -> enabled=%d activeDown=%d activeSeed=%d activeLimit=%d announceLimit=%d checkingLimit=%d",
+          enabled, d, s, a, announce, checking);
 }
 
 - (void)forceReannounceAll {
@@ -897,18 +927,26 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
     // Also kick DHT and LSD announces so peers learn the new listen
     // port through every available discovery channel — this is the
     // "actively reconnect" behavior the port-cycle flow needs.
-    for (auto const &h : _session->get_torrents()) {
+    std::vector<lt::torrent_handle> handles = _session->get_torrents();
+    int idx = 0;
+    int announceLimit = ctrl_background_announce_limit();
+    for (auto const &h : handles) {
         if (!h.is_valid()) continue;
+        int delaySeconds = MIN(idx / 20, 90);
         try {
-            h.force_reannounce(0, -1, lt::torrent_handle::ignore_min_interval);
+            h.force_reannounce(delaySeconds, -1, lt::torrent_handle::ignore_min_interval);
         } catch (...) {
             // Some torrent states (e.g. waiting for metadata with no
             // tracker info yet) throw. Fall back to the vanilla form.
             h.force_reannounce();
         }
-        try { h.force_dht_announce(); } catch (...) {}
-        try { h.force_lsd_announce(); } catch (...) {}
+        if (idx < announceLimit) {
+            try { h.force_dht_announce(); } catch (...) {}
+            try { h.force_lsd_announce(); } catch (...) {}
+        }
+        idx += 1;
     }
+    NSLog(@"[Controllarr] force reannounce scheduled %lu torrents in staggered batches", handles.size());
 }
 
 // MARK: Alerts

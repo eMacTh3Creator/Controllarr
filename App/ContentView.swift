@@ -1467,7 +1467,7 @@ struct SettingsView: View {
                     Text("Queued torrents resume automatically when a running torrent finishes, is paused, or is removed. To keep a specific torrent running past the caps, right-click it and choose Force Resume.")
                         .font(.caption).foregroundStyle(.secondary)
                 } else {
-                    Text("Queueing is off: every torrent runs concurrently with no auto-pause. Enable only if you actually want libtorrent to cap the number of running torrents (this is what caused the \u{201C}torrents randomly pausing\u{201D} behavior in earlier builds).")
+                    Text("Queueing is off: every torrent can stay running with no auto-pause. Controllarr still caps background tracker, DHT, and checking work so large libraries do not overwhelm DNS or tracker resolution.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
