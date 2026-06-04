@@ -9,7 +9,7 @@
 
 Controllarr uses [libtorrent-rasterbar](https://www.libtorrent.org/) as its engine and wraps it in a Swift + SwiftUI desktop app with both a native macOS window and an embedded React web UI. It speaks the qBittorrent Web API so existing *arr apps can point at it with zero extra configuration.
 
-**Status:** v2.1.5 — preferred forwarded-port text box hotfix. The VPN forwarded-port setting is now a direct text field in both the native window and WebUI, making PIA-style ports like `53127` easy to type or paste. Built on v2.1.4 (preferred forwarded-port support), v2.1.3 (resolver-protection hotfix), v2.1.2 (large-library stability), v2.1.1 (Force Resume + configurable queueing), v2.1.0 (duplicate detection / force recheck / context menus / multi-select / port-cycle reconnect), v2.0.2 (category filter dropdown + menu-bar reliability), v2.0.1 (resume sidecars + periodic save), and v2.0.0 (peer-discovery toggles, connection-count limits, WebUI hardening, category-aware file moves, Torrents sort/filter, Settings redesign). See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
+**Status:** v2.1.6 — consistent typed port inputs. Preferred forwarded port, WebUI port, listen range start, and listen range end now use matching type/paste port fields in the native window and WebUI. Built on v2.1.5 (preferred forwarded-port text box), v2.1.4 (preferred forwarded-port support), v2.1.3 (resolver-protection hotfix), v2.1.2 (large-library stability), v2.1.1 (Force Resume + configurable queueing), v2.1.0 (duplicate detection / force recheck / context menus / multi-select / port-cycle reconnect), v2.0.2 (category filter dropdown + menu-bar reliability), v2.0.1 (resume sidecars + periodic save), and v2.0.0 (peer-discovery toggles, connection-count limits, WebUI hardening, category-aware file moves, Torrents sort/filter, Settings redesign). See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
 
 The next major step is a larger **v1.5** release that turns Controllarr from "a Mac-native qBittorrent replacement for *arr apps" into a true download orchestration platform with deeper automation, remote operations, security, and observability. The current roadmap lives in [docs/V1_5_ROADMAP.md](docs/V1_5_ROADMAP.md).
 
@@ -66,6 +66,7 @@ If you want the detailed feature slate, recommended scope, and stretch goals, st
 - [docs/OPERATIONS.md](docs/OPERATIONS.md) — headless daemon usage, backup/export/restore, recovery rules, post-processing retries, and disk-space operations
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — large-library behavior, runtime polling model, and scaling guidance for 1,000+ torrents
 - [docs/V1_5_ROADMAP.md](docs/V1_5_ROADMAP.md) — proposed big-ticket roadmap for the v1.5 release
+- [RELEASE_NOTES_v2.1.6.md](RELEASE_NOTES_v2.1.6.md) — consistent typed port inputs across native and WebUI
 - [RELEASE_NOTES_v2.1.5.md](RELEASE_NOTES_v2.1.5.md) — preferred forwarded-port text box hotfix
 - [RELEASE_NOTES_v2.1.4.md](RELEASE_NOTES_v2.1.4.md) — preferred forwarded-port support for VPN users
 - [RELEASE_NOTES_v2.1.3.md](RELEASE_NOTES_v2.1.3.md) — resolver-protection hotfix for confirmed v2.1.2 crash under sustained 700+ torrent operation

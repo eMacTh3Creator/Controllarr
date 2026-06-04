@@ -1416,7 +1416,7 @@ struct SettingsView: View {
         Form {
             Section("WebUI") {
                 TextField("Bind host", text: binding.webUIHost)
-                TextField("Port", value: binding.webUIPort, format: .number)
+                intPortRow(title: "Port", binding: binding.webUIPort)
                 TextField("Username", text: binding.webUIUsername)
                 SecureField("Password", text: binding.webUIPassword)
                 Text("Use 0.0.0.0 for LAN clients like Sonarr, Radarr, and Overseerr on another machine. Restart Controllarr after changing the bind host or port.")
@@ -1429,8 +1429,8 @@ struct SettingsView: View {
                     binding: binding.preferredListenPort,
                     defaultValue: binding.wrappedValue.listenPortRangeStart
                 )
-                TextField("Start", value: binding.listenPortRangeStart, format: .number)
-                TextField("End", value: binding.listenPortRangeEnd, format: .number)
+                uint16PortRow(title: "Range start", binding: binding.listenPortRangeStart)
+                uint16PortRow(title: "Range end", binding: binding.listenPortRangeEnd)
                 Stepper(value: binding.stallThresholdMinutes, in: 1...240) {
                     Text("Port stall threshold: \(binding.wrappedValue.stallThresholdMinutes) min")
                 }
@@ -1883,6 +1883,46 @@ struct SettingsView: View {
                 }
                 .fixedSize()
             }
+        }
+    }
+
+    @ViewBuilder
+    private func uint16PortRow(title: String, binding: Binding<UInt16>) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            TextField(
+                "Port",
+                value: Binding(
+                    get: { Int(binding.wrappedValue) },
+                    set: { binding.wrappedValue = UInt16(min(65_535, max(1, $0))) }
+                ),
+                format: .number
+            )
+            .textFieldStyle(.roundedBorder)
+            .monospacedDigit()
+            .frame(width: 96)
+            .fixedSize()
+        }
+    }
+
+    @ViewBuilder
+    private func intPortRow(title: String, binding: Binding<Int>) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            TextField(
+                "Port",
+                value: Binding(
+                    get: { binding.wrappedValue },
+                    set: { binding.wrappedValue = min(65_535, max(1, $0)) }
+                ),
+                format: .number
+            )
+            .textFieldStyle(.roundedBorder)
+            .monospacedDigit()
+            .frame(width: 96)
+            .fixedSize()
         }
     }
 }

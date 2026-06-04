@@ -1296,12 +1296,10 @@ function SettingsTab({
             </label>
             <label className="field">
               <span>Port</span>
-              <input
-                type="number"
+              <PortTextInput
                 value={settings.webUIPort}
-                onChange={(event) =>
-                  patch({ webUIPort: readNumber(event.currentTarget.valueAsNumber, settings.webUIPort) })
-                }
+                placeholder="8791"
+                onChange={(value) => patch({ webUIPort: value })}
               />
             </label>
             <label className="field">
@@ -1348,32 +1346,18 @@ function SettingsTab({
             />
             <label className="field">
               <span>Range start</span>
-              <input
-                type="number"
+              <PortTextInput
                 value={settings.listenPortRangeStart}
-                onChange={(event) =>
-                  patch({
-                    listenPortRangeStart: readNumber(
-                      event.currentTarget.valueAsNumber,
-                      settings.listenPortRangeStart,
-                    ),
-                  })
-                }
+                placeholder="49152"
+                onChange={(value) => patch({ listenPortRangeStart: value })}
               />
             </label>
             <label className="field">
               <span>Range end</span>
-              <input
-                type="number"
+              <PortTextInput
                 value={settings.listenPortRangeEnd}
-                onChange={(event) =>
-                  patch({
-                    listenPortRangeEnd: readNumber(
-                      event.currentTarget.valueAsNumber,
-                      settings.listenPortRangeEnd,
-                    ),
-                  })
-                }
+                placeholder="65000"
+                onChange={(value) => patch({ listenPortRangeEnd: value })}
               />
             </label>
             <label className="field">
@@ -3059,23 +3043,6 @@ function OptionalPortField({
   onToggle: (enabled: boolean) => void
   onValueChange: (value: number | null) => void
 }) {
-  const [draft, setDraft] = useState(value === null ? '' : String(value))
-
-  useEffect(() => {
-    setDraft(value === null ? '' : String(value))
-  }, [value])
-
-  function updateDraft(rawValue: string) {
-    const digitsOnly = rawValue.replace(/[^\d]/g, '')
-    setDraft(digitsOnly)
-    if (!digitsOnly) return
-
-    const parsed = Number(digitsOnly)
-    if (Number.isFinite(parsed)) {
-      onValueChange(Math.max(1, Math.min(65_535, Math.round(parsed))))
-    }
-  }
-
   return (
     <div className="optional-field">
       <label className="toggle-field">
@@ -3089,20 +3056,55 @@ function OptionalPortField({
       {value !== null && (
         <label className="field">
           <span>Port</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
+          <PortTextInput
+            value={value}
             placeholder="53127"
-            value={draft}
-            onBlur={() => {
-              if (!draft) setDraft(String(value))
-            }}
-            onChange={(event) => updateDraft(event.target.value)}
+            onChange={onValueChange}
           />
         </label>
       )}
     </div>
+  )
+}
+
+function PortTextInput({
+  value,
+  placeholder,
+  onChange,
+}: {
+  value: number
+  placeholder?: string
+  onChange: (value: number) => void
+}) {
+  const [draft, setDraft] = useState(String(value))
+
+  useEffect(() => {
+    setDraft(String(value))
+  }, [value])
+
+  function updateDraft(rawValue: string) {
+    const digitsOnly = rawValue.replace(/[^\d]/g, '')
+    setDraft(digitsOnly)
+    if (!digitsOnly) return
+
+    const parsed = Number(digitsOnly)
+    if (Number.isFinite(parsed)) {
+      onChange(Math.max(1, Math.min(65_535, Math.round(parsed))))
+    }
+  }
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      pattern="[0-9]*"
+      placeholder={placeholder}
+      value={draft}
+      onBlur={() => {
+        if (!draft) setDraft(String(value))
+      }}
+      onChange={(event) => updateDraft(event.target.value)}
+    />
   )
 }
 

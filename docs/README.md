@@ -12,6 +12,7 @@ This folder holds the higher-level product and planning docs that sit alongside 
 
 ## Release Notes
 
+- [../RELEASE_NOTES_v2.1.6.md](../RELEASE_NOTES_v2.1.6.md) — consistent typed port inputs across native and WebUI
 - [../RELEASE_NOTES_v2.1.5.md](../RELEASE_NOTES_v2.1.5.md) — preferred forwarded-port text box hotfix
 - [../RELEASE_NOTES_v2.1.4.md](../RELEASE_NOTES_v2.1.4.md) — preferred forwarded-port support for VPN users
 - [../RELEASE_NOTES_v2.1.3.md](../RELEASE_NOTES_v2.1.3.md) — resolver-protection hotfix for confirmed v2.1.2 crash under sustained 700+ torrent operation
