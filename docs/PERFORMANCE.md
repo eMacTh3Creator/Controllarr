@@ -42,9 +42,9 @@ The libtorrent session now uses a balanced `aio_threads` budget based on availab
 
 ### Bounded Tracker/DHT Pressure
 
-v2.1.2 keeps torrent queueing off by default so libtorrent does not auto-pause torrents, but tracker, DHT, LSD, and checking work are still capped internally. This prevents large sessions from launching hundreds of DNS/tracker resolver jobs at once while preserving the "all torrents may stay running" behavior.
+v2.1.2 kept torrent queueing off by default so libtorrent does not auto-pause torrents, but capped tracker, DHT, LSD, and checking work internally. v2.1.3 tightens this further after a confirmed resolver crash in a 700+ torrent v2.1.2 session: tracker-announcing torrents and concurrent HTTP tracker announces are now deliberately conservative, resolver cache entries live longer, failed trackers back off more aggressively, and multi-tracker fanout is disabled.
 
-Mass reannounce operations are also staggered in batches so a port cycle does not ask every tracker for every torrent to resolve immediately.
+Mass reannounce operations are also staggered over a longer window so a port cycle does not ask every tracker for every torrent to resolve immediately.
 
 ## Practical Guidance
 

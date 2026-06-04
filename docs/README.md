@@ -12,6 +12,7 @@ This folder holds the higher-level product and planning docs that sit alongside 
 
 ## Release Notes
 
+- [../RELEASE_NOTES_v2.1.3.md](../RELEASE_NOTES_v2.1.3.md) — resolver-protection hotfix for confirmed v2.1.2 crash under sustained 700+ torrent operation
 - [../RELEASE_NOTES_v2.1.2.md](../RELEASE_NOTES_v2.1.2.md) — large-library crash fix for bounded tracker/DHT/checking pressure
 - [../RELEASE_NOTES_v2.1.1.md](../RELEASE_NOTES_v2.1.1.md) — fixes random torrent auto-pausing, adds Force Resume, and makes libtorrent queueing configurable
 - [../RELEASE_NOTES_v2.1.0.md](../RELEASE_NOTES_v2.1.0.md) — duplicate detection, force recheck, context menus, multi-select operations, and stronger port-cycle reconnect
