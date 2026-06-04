@@ -65,6 +65,21 @@ Controllarr now includes a built-in network diagnostics panel in both the native
 - Controllarr already keeps torrent traffic on the VPN adapter separately from the WebUI/API listener
 - If diagnostics say remote access is configured correctly but other machines still cannot connect while the VPN is on, the VPN client is likely blocking inbound LAN traffic at the OS/filter level
 
+## Preferred Forwarded Port
+
+Some VPN providers, including PIA, assign a specific forwarded incoming port.
+Set **Settings -> General -> Preferred forwarded port** to that value, for
+example `53127`.
+
+Controllarr uses this port before `lastKnownGoodPort` on startup, applies it
+immediately when saved, and tries it before random fallback ports during port
+cycling. If the preferred port itself goes stale, Controllarr moves to a
+fallback from the configured range; if a fallback later goes stale, it retries
+the preferred port.
+
+Leave the field blank if your VPN does not provide a forwarded port or if the
+port changes too often to manage manually.
+
 ## Backup, Export, and Restore
 
 The WebUI Settings tab now includes a **Backup & restore** panel.

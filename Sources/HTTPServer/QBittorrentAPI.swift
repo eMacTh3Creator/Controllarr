@@ -99,8 +99,14 @@ public enum QBittorrentAPI {
             await services.store.updateSettings { s in
                 if let save = dict["save_path"] as? String { s.defaultSavePath = save }
                 if let user = dict["web_ui_username"] as? String { s.webUIUsername = user }
-                if let port = dict["listen_port"] as? Int {
-                    Task { await services.engine.setListenPort(UInt16(port)) }
+                if let port = dict["listen_port"] as? Int,
+                   let listenPort = UInt16(exactly: port) {
+                    s.preferredListenPort = listenPort
+                    Task {
+                        await services.engine.setListenPort(listenPort)
+                        await services.engine.forceReannounceAll()
+                        await services.store.setLastKnownGoodPort(listenPort)
+                    }
                 }
             }
             return Response(status: .ok)
@@ -629,9 +635,23 @@ public enum QBittorrentAPI {
                     }
                 }
             }
+            let preferredPortToApply: UInt16? = {
+                guard dict.keys.contains("preferredListenPort"),
+                      let v = dict["preferredListenPort"] as? Int else {
+                    return nil
+                }
+                return UInt16(exactly: v)
+            }()
             await services.store.updateSettings { s in
                 if let v = dict["listenPortRangeStart"] as? Int { s.listenPortRangeStart = UInt16(v) }
                 if let v = dict["listenPortRangeEnd"]   as? Int { s.listenPortRangeEnd   = UInt16(v) }
+                if dict.keys.contains("preferredListenPort") {
+                    if let v = dict["preferredListenPort"] as? Int {
+                        s.preferredListenPort = UInt16(exactly: v)
+                    } else {
+                        s.preferredListenPort = nil
+                    }
+                }
                 if let v = dict["stallThresholdMinutes"] as? Int { s.stallThresholdMinutes = v }
                 if let v = dict["defaultSavePath"]   as? String { s.defaultSavePath = v }
                 if let v = dict["webUIHost"]         as? String { s.webUIHost = v }
@@ -707,6 +727,11 @@ public enum QBittorrentAPI {
                         )
                     }
                 }
+            }
+            if let preferredPort = preferredPortToApply {
+                await services.engine.setListenPort(preferredPort)
+                await services.engine.forceReannounceAll()
+                await services.store.setLastKnownGoodPort(preferredPort)
             }
             return plainText("")
         }
@@ -1049,6 +1074,8 @@ public enum QBittorrentAPI {
                 ]
             },
         ]
+        if let v = s.preferredListenPort { dict["preferredListenPort"] = Int(v) }
+        else { dict["preferredListenPort"] = NSNull() }
         if let v = s.globalMaxRatio { dict["globalMaxRatio"] = v }
         if let v = s.globalMaxSeedingTimeMinutes { dict["globalMaxSeedingTimeMinutes"] = v }
         if let v = s.diskSpaceMinimumGB { dict["diskSpaceMinimumGB"] = v }

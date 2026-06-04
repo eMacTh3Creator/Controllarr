@@ -14,6 +14,7 @@ import Foundation
     let s = Settings.defaults(homeDir: home)
     #expect(s.listenPortRangeStart > 0)
     #expect(s.listenPortRangeEnd > s.listenPortRangeStart)
+    #expect(s.preferredListenPort == nil)
     #expect(s.webUIPort > 0)
     #expect(s.stallThresholdMinutes > 0)
     #expect(!s.defaultSavePath.isEmpty)
@@ -51,6 +52,7 @@ import Foundation
     let s = try JSONDecoder().decode(Settings.self, from: data)
     #expect(s.listenPortRangeStart == 49152)
     #expect(s.listenPortRangeEnd == 65000)
+    #expect(s.preferredListenPort == nil)
     #expect(s.stallThresholdMinutes == 10)
     #expect(s.defaultSavePath == "/tmp/downloads")
     #expect(s.webUIHost == "127.0.0.1")
@@ -87,6 +89,7 @@ import Foundation
     let original = Settings(
         listenPortRangeStart: 50000,
         listenPortRangeEnd: 60000,
+        preferredListenPort: 53127,
         stallThresholdMinutes: 15,
         defaultSavePath: "/tmp/test-save",
         webUIHost: "0.0.0.0",
@@ -114,6 +117,17 @@ import Foundation
     let data = try encoder.encode(original)
     let decoded = try JSONDecoder().decode(Settings.self, from: data)
     #expect(decoded == original)
+}
+
+@Test func testInitialListenPortPrefersForwardedPort() {
+    var settings = Settings.defaults(homeDir: URL(fileURLWithPath: "/tmp/controllarr-test-home"))
+    settings.listenPortRangeStart = 49152
+
+    #expect(settings.initialListenPort(lastKnownGoodPort: 60745) == 60745)
+
+    settings.preferredListenPort = 53127
+    #expect(settings.initialListenPort(lastKnownGoodPort: 60745) == 53127)
+    #expect(settings.initialListenPort(lastKnownGoodPort: nil) == 53127)
 }
 
 @Test func testRecoveryRuleRoundTrip() throws {

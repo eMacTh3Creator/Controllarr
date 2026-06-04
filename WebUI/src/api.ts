@@ -145,6 +145,7 @@ export type BackupImportResult = {
 export type Settings = {
   listenPortRangeStart: number
   listenPortRangeEnd: number
+  preferredListenPort: number | null
   stallThresholdMinutes: number
   defaultSavePath: string
   webUIHost: string
@@ -354,6 +355,7 @@ export const api = {
     return {
       listenPortRangeStart: response.listenPortRangeStart ?? 49152,
       listenPortRangeEnd: response.listenPortRangeEnd ?? 65000,
+      preferredListenPort: response.preferredListenPort ?? null,
       stallThresholdMinutes: response.stallThresholdMinutes ?? 10,
       defaultSavePath: response.defaultSavePath ?? '',
       webUIHost: response.webUIHost ?? '127.0.0.1',
@@ -386,6 +388,7 @@ export const api = {
       webUIPassword: settings.webUIPassword?.trim() ? settings.webUIPassword : undefined,
       globalMaxRatio: settings.globalMaxRatio,
       globalMaxSeedingTimeMinutes: settings.globalMaxSeedingTimeMinutes,
+      preferredListenPort: settings.preferredListenPort,
       recoveryRules: settings.recoveryRules,
       bandwidthSchedule: settings.bandwidthSchedule,
       vpnEnabled: settings.vpnEnabled,

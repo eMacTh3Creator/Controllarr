@@ -9,7 +9,7 @@
 
 Controllarr uses [libtorrent-rasterbar](https://www.libtorrent.org/) as its engine and wraps it in a Swift + SwiftUI desktop app with both a native macOS window and an embedded React web UI. It speaks the qBittorrent Web API so existing *arr apps can point at it with zero extra configuration.
 
-**Status:** v2.1.3 — resolver-protection hotfix for very large active torrent libraries. A confirmed v2.1.2 crash still landed in libtorrent's hostname resolver after nearly two days of 700+ torrent operation, so v2.1.3 tightens tracker/DNS pressure further: lower tracker announce caps, capped HTTP tracker announces, longer resolver caching, stronger failed-tracker backoff, disabled multi-tracker fanout, and slower mass reannounce. Built on v2.1.2 (large-library stability), v2.1.1 (Force Resume + configurable queueing), v2.1.0 (duplicate detection / force recheck / context menus / multi-select / port-cycle reconnect), v2.0.2 (category filter dropdown + menu-bar reliability), v2.0.1 (resume sidecars + periodic save), and v2.0.0 (peer-discovery toggles, connection-count limits, WebUI hardening, category-aware file moves, Torrents sort/filter, Settings redesign). See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
+**Status:** v2.1.4 — preferred forwarded-port support for VPN users. Set a manual preferred port (for example PIA's current forwarded port) and Controllarr tries it first at startup, applies it immediately when saved, retries it before random fallbacks, and still falls back to the configured range if that preferred port goes stale. Built on v2.1.3 (resolver-protection hotfix), v2.1.2 (large-library stability), v2.1.1 (Force Resume + configurable queueing), v2.1.0 (duplicate detection / force recheck / context menus / multi-select / port-cycle reconnect), v2.0.2 (category filter dropdown + menu-bar reliability), v2.0.1 (resume sidecars + periodic save), and v2.0.0 (peer-discovery toggles, connection-count limits, WebUI hardening, category-aware file moves, Torrents sort/filter, Settings redesign). See [Releases](https://github.com/eMacTh3Creator/Controllarr/releases) for a pre-built binary.
 
 The next major step is a larger **v1.5** release that turns Controllarr from "a Mac-native qBittorrent replacement for *arr apps" into a true download orchestration platform with deeper automation, remote operations, security, and observability. The current roadmap lives in [docs/V1_5_ROADMAP.md](docs/V1_5_ROADMAP.md).
 
@@ -30,6 +30,7 @@ Initial v1.5 foundation work is already landing on `main`: there is now a headle
 - **Keychain credential storage** for the WebUI password and *arr API keys
 - **VPN kill switch** — detects VPN tunnel interfaces (PIA, WireGuard, etc.) and pauses all torrents instantly when the VPN drops; auto-resumes on reconnect
 - **VPN interface binding** — binds libtorrent's outgoing and listen interfaces to the VPN adapter so torrent traffic never leaks through the default route
+- **Preferred forwarded port** — tries your VPN-assigned incoming port first, then falls back to automatic port cycling if it goes stale
 - **Network diagnostics** — show bind host, LAN IPs, VPN interface, recommended remote URLs, and warnings when the VPN client is likely blocking LAN ingress
 - **Large-library performance tuning** — shared torrent snapshot caching, single-pass session aggregation, balanced libtorrent I/O thread tuning, and lower-overhead polling across the runtime, native UI, and WebUI
 - **Disk-space-aware auto-pause** — monitors free space, pauses downloads when below threshold, and exposes operator recheck telemetry in the WebUI
@@ -65,6 +66,7 @@ If you want the detailed feature slate, recommended scope, and stretch goals, st
 - [docs/OPERATIONS.md](docs/OPERATIONS.md) — headless daemon usage, backup/export/restore, recovery rules, post-processing retries, and disk-space operations
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — large-library behavior, runtime polling model, and scaling guidance for 1,000+ torrents
 - [docs/V1_5_ROADMAP.md](docs/V1_5_ROADMAP.md) — proposed big-ticket roadmap for the v1.5 release
+- [RELEASE_NOTES_v2.1.4.md](RELEASE_NOTES_v2.1.4.md) — preferred forwarded-port support for VPN users
 - [RELEASE_NOTES_v2.1.3.md](RELEASE_NOTES_v2.1.3.md) — resolver-protection hotfix for confirmed v2.1.2 crash under sustained 700+ torrent operation
 - [RELEASE_NOTES_v2.1.2.md](RELEASE_NOTES_v2.1.2.md) — large-library crash fix for tracker/DHT/checking background pressure and staggered mass reannounce
 - [RELEASE_NOTES_v2.1.1.md](RELEASE_NOTES_v2.1.1.md) — fixes "random pausing" (session queueing default + per-torrent connection-cap routing), adds Force Resume, makes libtorrent queueing a configurable Settings toggle

@@ -1326,9 +1326,28 @@ function SettingsTab({
         <section className="form-panel">
           <div className="form-panel-header">
             <h3>Listen port range</h3>
-            <p>PortWatcher will rotate within this range if the session goes stale.</p>
+            <p>Set a VPN-forwarded preferred port first; PortWatcher falls back to this range if it goes stale.</p>
           </div>
           <div className="form-grid">
+            <OptionalNumberField
+              label="Preferred forwarded port"
+              value={settings.preferredListenPort}
+              step={1}
+              min={1}
+              onToggle={(enabled) =>
+                patch({
+                  preferredListenPort: enabled
+                    ? settings.preferredListenPort ?? settings.listenPortRangeStart
+                    : null,
+                })
+              }
+              onValueChange={(value) =>
+                patch({
+                  preferredListenPort:
+                    value === null ? null : Math.max(1, Math.min(65535, Math.round(value))),
+                })
+              }
+            />
             <label className="field">
               <span>Range start</span>
               <input

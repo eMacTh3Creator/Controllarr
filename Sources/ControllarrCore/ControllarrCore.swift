@@ -50,7 +50,7 @@ public actor ControllarrRuntime {
 
         let snapshot = await store.snapshot()
         let savePathURL = URL(fileURLWithPath: snapshot.settings.defaultSavePath)
-        let listenPort  = snapshot.lastKnownGoodPort ?? snapshot.settings.listenPortRangeStart
+        let listenPort  = snapshot.settings.initialListenPort(lastKnownGoodPort: snapshot.lastKnownGoodPort)
 
         let engine = TorrentEngine(
             defaultSavePath: savePathURL,

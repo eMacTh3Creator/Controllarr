@@ -1424,11 +1424,19 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section("Listen port range") {
+                optionalPortRow(
+                    title: "Preferred forwarded port",
+                    binding: binding.preferredListenPort,
+                    defaultValue: binding.wrappedValue.listenPortRangeStart
+                )
                 TextField("Start", value: binding.listenPortRangeStart, format: .number)
                 TextField("End", value: binding.listenPortRangeEnd, format: .number)
                 Stepper(value: binding.stallThresholdMinutes, in: 1...240) {
                     Text("Port stall threshold: \(binding.wrappedValue.stallThresholdMinutes) min")
                 }
+                Text("Set this to your VPN-forwarded port, for example PIA's current forwarded port. Controllarr tries it first at startup and before random fallback ports.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Button("Cycle port now") { Task { await vm.cyclePort() } }
             }
             Section("Default save path") {
@@ -1844,6 +1852,29 @@ struct SettingsView: View {
                     step: 60
                 ) {
                     Text("\(v) min").monospacedDigit()
+                }
+                .fixedSize()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func optionalPortRow(title: String, binding: Binding<UInt16?>, defaultValue: UInt16) -> some View {
+        HStack {
+            Toggle(title, isOn: Binding(
+                get: { binding.wrappedValue != nil },
+                set: { binding.wrappedValue = $0 ? (binding.wrappedValue ?? defaultValue) : nil }
+            ))
+            if binding.wrappedValue != nil {
+                Stepper(
+                    value: Binding(
+                        get: { Int(binding.wrappedValue ?? defaultValue) },
+                        set: { binding.wrappedValue = UInt16(clamping: $0) }
+                    ),
+                    in: 1...65_535,
+                    step: 1
+                ) {
+                    Text("\(binding.wrappedValue.map(Int.init) ?? Int(defaultValue))").monospacedDigit()
                 }
                 .fixedSize()
             }

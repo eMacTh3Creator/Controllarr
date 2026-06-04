@@ -392,6 +392,10 @@ public struct Settings: Codable, Sendable, Equatable {
     /// reselecting. Inclusive on both ends.
     public var listenPortRangeStart: UInt16
     public var listenPortRangeEnd: UInt16
+    /// Optional operator-preferred listen port, typically the forwarded
+    /// port assigned by a VPN provider such as PIA. Controllarr tries this
+    /// port before falling back to the randomized range.
+    public var preferredListenPort: UInt16?
     /// Minutes of zero-payload-transfer before PortWatcher considers the
     /// port stalled and cycles to a new one.
     public var stallThresholdMinutes: Int
@@ -503,6 +507,7 @@ public struct Settings: Codable, Sendable, Equatable {
         Settings(
             listenPortRangeStart: 49152,
             listenPortRangeEnd:   65000,
+            preferredListenPort: nil,
             stallThresholdMinutes: 10,
             defaultSavePath: homeDir
                 .appendingPathComponent("Downloads")
@@ -542,6 +547,7 @@ public struct Settings: Codable, Sendable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.listenPortRangeStart = try c.decode(UInt16.self, forKey: .listenPortRangeStart)
         self.listenPortRangeEnd = try c.decode(UInt16.self, forKey: .listenPortRangeEnd)
+        self.preferredListenPort = try c.decodeIfPresent(UInt16.self, forKey: .preferredListenPort)
         self.stallThresholdMinutes = try c.decode(Int.self, forKey: .stallThresholdMinutes)
         self.defaultSavePath = try c.decode(String.self, forKey: .defaultSavePath)
         self.webUIHost = try c.decode(String.self, forKey: .webUIHost)
@@ -577,6 +583,7 @@ public struct Settings: Codable, Sendable, Equatable {
     public init(
         listenPortRangeStart: UInt16,
         listenPortRangeEnd: UInt16,
+        preferredListenPort: UInt16? = nil,
         stallThresholdMinutes: Int,
         defaultSavePath: String,
         webUIHost: String,
@@ -610,6 +617,7 @@ public struct Settings: Codable, Sendable, Equatable {
     ) {
         self.listenPortRangeStart = listenPortRangeStart
         self.listenPortRangeEnd = listenPortRangeEnd
+        self.preferredListenPort = preferredListenPort
         self.stallThresholdMinutes = stallThresholdMinutes
         self.defaultSavePath = defaultSavePath
         self.webUIHost = webUIHost
@@ -640,6 +648,10 @@ public struct Settings: Codable, Sendable, Equatable {
         self.categoryChangeMove = categoryChangeMove
         self.duplicateTorrentPolicy = duplicateTorrentPolicy
         self.torrentQueueing = torrentQueueing
+    }
+
+    public func initialListenPort(lastKnownGoodPort: UInt16?) -> UInt16 {
+        preferredListenPort ?? lastKnownGoodPort ?? listenPortRangeStart
     }
 }
 

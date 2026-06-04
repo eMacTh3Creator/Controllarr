@@ -210,7 +210,7 @@
       </a>
       <div class="nav-links" aria-label="Primary navigation">
         <a href="#features">Features</a>
-        <a href="#release">v2.1.3</a>
+        <a href="#release">v2.1.4</a>
         <a href="#install">Install</a>
         <a href="https://github.com/eMacTh3Creator/Controllarr/tree/main/docs">Docs</a>
       </div>
@@ -225,7 +225,7 @@
           <h1>Mac-native torrent control for your <span class="arr">*arr</span> stack.</h1>
           <p class="lead">Controllarr is a native macOS BitTorrent client and qBittorrent-compatible API target built for Sonarr, Radarr, Overseerr, Plex, and operators who want a Mac mini to behave like a proper media-download node.</p>
           <div class="actions">
-            <a class="button primary" href="https://github.com/eMacTh3Creator/Controllarr/releases/latest">Download v2.1.3</a>
+            <a class="button primary" href="https://github.com/eMacTh3Creator/Controllarr/releases/latest">Download v2.1.4</a>
             <a class="button quiet" href="https://github.com/eMacTh3Creator/Controllarr">View on GitHub</a>
           </div>
           <div class="proof" aria-label="Project highlights">
@@ -315,7 +315,7 @@ GET /api/v2/torrents/info</pre>
             <div class="icon-orb">1K</div>
             <div>
               <h3>Large-library stability</h3>
-              <p>v2.1.3 keeps torrents from being silently auto-paused while tightening tracker, DNS, DHT, LSD, and checking pressure so hundreds of active torrents do not overwhelm resolver work.</p>
+              <p>v2.1.4 lets VPN users set a preferred forwarded port, then falls back to automatic cycling if that port goes stale.</p>
             </div>
             <div class="signal-grid">
               <div class="signal-card"><strong>1,000+</strong><span>torrent guidance</span></div>
@@ -344,18 +344,18 @@ Login:  admin / adminadmin</pre>
       <div class="shell">
         <div class="release-band">
           <div>
-            <h2>What's new in v2.1.3</h2>
-            <p class="lead">A resolver-protection hotfix built from a confirmed v2.1.2 crash after nearly two days of 700+ torrent operation.</p>
+            <h2>What's new in v2.1.4</h2>
+            <p class="lead">Preferred forwarded-port support for VPN users, built for setups where PIA or another VPN assigns the incoming torrent port.</p>
             <div class="actions">
-              <a class="button primary" href="https://github.com/eMacTh3Creator/Controllarr/releases/tag/v2.1.3">Release notes</a>
+              <a class="button primary" href="https://github.com/eMacTh3Creator/Controllarr/releases/tag/v2.1.4">Release notes</a>
               <a class="button quiet" href="https://github.com/eMacTh3Creator/Controllarr/blob/main/docs/PERFORMANCE.md">Performance guide</a>
             </div>
           </div>
           <ul class="release-list">
-            <li><span class="amber">01</span><span><b>Conservative resolver mode.</b> Tracker announce caps and concurrent HTTP announces are now deliberately lower for huge libraries.</span></li>
-            <li><span class="amber">02</span><span><b>No unwanted auto-pauses.</b> Active torrent queue caps remain high by default so libraries do not randomly stall from libtorrent queueing.</span></li>
-            <li><span class="amber">03</span><span><b>Slower mass reannounce.</b> Port-cycle reconnect spreads announces over a wider window instead of creating a short DNS burst.</span></li>
-            <li><span class="amber">04</span><span><b>Less tracker fanout.</b> Failed trackers back off harder and multi-tracker fanout is disabled to reduce sustained resolver load.</span></li>
+            <li><span class="amber">01</span><span><b>Preferred forwarded port.</b> Set the port assigned by your VPN, such as PIA's current forwarded port.</span></li>
+            <li><span class="amber">02</span><span><b>Applies immediately.</b> Saving the preferred port switches libtorrent and reannounces torrents.</span></li>
+            <li><span class="amber">03</span><span><b>Smart fallback.</b> If the preferred port goes stale, Controllarr falls back to the configured random range.</span></li>
+            <li><span class="amber">04</span><span><b>Retries later.</b> If a fallback port fails later, Controllarr tries the preferred forwarded port again.</span></li>
           </ul>
         </div>
       </div>
@@ -371,7 +371,7 @@ Login:  admin / adminadmin</pre>
           <article class="step">
             <div class="step-num">1</div>
             <h3>Download</h3>
-            <p>Grab <code>Controllarr-v2.1.3-macOS-arm64.zip</code> from the latest GitHub release.</p>
+            <p>Grab <code>Controllarr-v2.1.4-macOS-arm64.zip</code> from the latest GitHub release.</p>
           </article>
           <article class="step">
             <div class="step-num">2</div>

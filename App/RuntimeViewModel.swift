@@ -433,8 +433,15 @@ final class RuntimeViewModel {
 
     func saveSettings(_ newSettings: Persistence.Settings) async {
         guard let runtime else { return }
+        let currentPort = await runtime.engine.listenPort
         await runtime.store.replaceSettings(newSettings)
         await runtime.applyNetworkSettings()
+        if let preferredPort = newSettings.preferredListenPort,
+           preferredPort != currentPort {
+            await runtime.engine.setListenPort(preferredPort)
+            await runtime.engine.forceReannounceAll()
+            await runtime.store.setLastKnownGoodPort(preferredPort)
+        }
         await refreshAll()
         if let delegate = NSApp.delegate as? AppDelegate {
             delegate.applyInterfacePreferences()

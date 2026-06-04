@@ -127,7 +127,7 @@ public actor PortWatcher {
             burned = [currentPort]
         }
 
-        guard let newPort = pickPort(settings: settings) else {
+        guard let newPort = pickPort(settings: settings, currentPort: currentPort) else {
             NSLog("[Controllarr] PortWatcher: no free port available in range")
             return
         }
@@ -141,7 +141,11 @@ public actor PortWatcher {
         NSLog("[Controllarr] PortWatcher: cycled \(currentPort) -> \(newPort) (\(reason))")
     }
 
-    private func pickPort(settings: Settings) -> UInt16? {
+    private func pickPort(settings: Settings, currentPort: UInt16) -> UInt16? {
+        if let preferred = settings.preferredListenPort, preferred != currentPort {
+            return preferred
+        }
+
         let lo = Int(settings.listenPortRangeStart)
         let hi = Int(settings.listenPortRangeEnd)
         guard hi >= lo else { return nil }
