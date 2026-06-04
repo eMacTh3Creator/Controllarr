@@ -7,7 +7,7 @@
 <p align="center">A Mac-native torrent control center for Sonarr, Radarr, Overseerr, Plex, and always-on media servers.</p>
 <p align="center">
   <a href="https://emacth3creator.github.io/Controllarr/">Public website</a> ·
-  <a href="https://github.com/eMacTh3Creator/Controllarr/releases/download/v2.1.6/Controllarr-v2.1.6-macOS-arm64.zip">Download v2.1.6</a> ·
+  <a href="https://github.com/eMacTh3Creator/Controllarr/releases/latest">Download latest release</a> ·
   <a href="docs/README.md">Documentation</a>
 </p>
 
@@ -15,7 +15,7 @@ Controllarr is a native macOS BitTorrent client powered by [libtorrent-rasterbar
 
 The project is built around a common media-server pain point: torrent traffic should stay on the VPN, but the WebUI and *arr API should remain reachable from another LAN machine. Controllarr includes VPN interface binding, LAN-aware WebUI settings, network diagnostics, and preferred forwarded-port support for providers such as PIA.
 
-**Current release:** v2.1.6. This release makes all operator-entered port fields consistent across the native app and WebUI: WebUI port, preferred forwarded port, listen range start, and listen range end all use type/paste-friendly port fields.
+**Current status:** Controllarr is public and usable, with active releases focused on VPN-safe operation, qBittorrent API compatibility, large-library stability, and smoother native/WebUI controls.
 
 ## Why Controllarr?
 
@@ -46,7 +46,7 @@ The project is built around a common media-server pain point: torrent traffic sh
 
 ## Quick Install
 
-1. Download [Controllarr-v2.1.6-macOS-arm64.zip](https://github.com/eMacTh3Creator/Controllarr/releases/download/v2.1.6/Controllarr-v2.1.6-macOS-arm64.zip).
+1. Download the newest macOS zip from the [latest GitHub release](https://github.com/eMacTh3Creator/Controllarr/releases/latest).
 2. Unzip it and move `Controllarr.app` to `/Applications`.
 3. Right-click `Controllarr.app` and choose **Open** the first time.
 
@@ -113,12 +113,10 @@ For a setup like PIA on the torrent Mac and Sonarr/Radarr on another machine:
 
 This design separates control traffic from torrent traffic: the API/WebUI can be reachable on the LAN while libtorrent remains bound to the VPN adapter.
 
-## Current Release
+## Releases
 
-v2.1.6 is the latest public release.
-
-- Direct download: [Controllarr-v2.1.6-macOS-arm64.zip](https://github.com/eMacTh3Creator/Controllarr/releases/download/v2.1.6/Controllarr-v2.1.6-macOS-arm64.zip)
-- Release notes: [RELEASE_NOTES_v2.1.6.md](RELEASE_NOTES_v2.1.6.md)
+- Latest release: [github.com/eMacTh3Creator/Controllarr/releases/latest](https://github.com/eMacTh3Creator/Controllarr/releases/latest)
+- All release notes: [github.com/eMacTh3Creator/Controllarr/releases](https://github.com/eMacTh3Creator/Controllarr/releases)
 - Public website: [emacth3creator.github.io/Controllarr](https://emacth3creator.github.io/Controllarr/)
 
 Recent release line:
@@ -132,7 +130,7 @@ Recent release line:
 - **v2.1.0:** duplicate detection, force recheck, context menus, multi-select operations, and stronger port-cycle reconnect.
 - **v2.0.0:** peer-discovery toggles, connection limits, WebUI hardening, category-aware file moves, and Settings redesign.
 
-## Roadmap Beyond v2.1
+## Roadmap
 
 The old "Road To v1.5" plan has largely become the current product direction: headless mode, recovery rules, backup/restore, VPN protection, performance tuning, network diagnostics, and deeper WebUI operations have already started landing.
 
