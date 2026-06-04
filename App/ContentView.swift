@@ -1866,15 +1866,20 @@ struct SettingsView: View {
                 set: { binding.wrappedValue = $0 ? (binding.wrappedValue ?? defaultValue) : nil }
             ))
             if binding.wrappedValue != nil {
-                Stepper(
+                TextField(
+                    "Port",
                     value: Binding(
                         get: { Int(binding.wrappedValue ?? defaultValue) },
-                        set: { binding.wrappedValue = UInt16(clamping: $0) }
+                        set: { binding.wrappedValue = UInt16(min(65_535, max(1, $0))) }
                     ),
-                    in: 1...65_535,
-                    step: 1
-                ) {
-                    Text("\(binding.wrappedValue.map(Int.init) ?? Int(defaultValue))").monospacedDigit()
+                    format: .number
+                )
+                .textFieldStyle(.roundedBorder)
+                .monospacedDigit()
+                .frame(width: 96)
+                .onSubmit {
+                    let clamped = min(65_535, max(1, Int(binding.wrappedValue ?? defaultValue)))
+                    binding.wrappedValue = UInt16(clamped)
                 }
                 .fixedSize()
             }

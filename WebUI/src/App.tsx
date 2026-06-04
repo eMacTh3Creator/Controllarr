@@ -1329,11 +1329,9 @@ function SettingsTab({
             <p>Set a VPN-forwarded preferred port first; PortWatcher falls back to this range if it goes stale.</p>
           </div>
           <div className="form-grid">
-            <OptionalNumberField
+            <OptionalPortField
               label="Preferred forwarded port"
               value={settings.preferredListenPort}
-              step={1}
-              min={1}
               onToggle={(enabled) =>
                 patch({
                   preferredListenPort: enabled
@@ -3046,6 +3044,64 @@ function CategoryModal({
           </button>
         </div>
       </form>
+    </div>
+  )
+}
+
+function OptionalPortField({
+  label,
+  value,
+  onToggle,
+  onValueChange,
+}: {
+  label: string
+  value: number | null
+  onToggle: (enabled: boolean) => void
+  onValueChange: (value: number | null) => void
+}) {
+  const [draft, setDraft] = useState(value === null ? '' : String(value))
+
+  useEffect(() => {
+    setDraft(value === null ? '' : String(value))
+  }, [value])
+
+  function updateDraft(rawValue: string) {
+    const digitsOnly = rawValue.replace(/[^\d]/g, '')
+    setDraft(digitsOnly)
+    if (!digitsOnly) return
+
+    const parsed = Number(digitsOnly)
+    if (Number.isFinite(parsed)) {
+      onValueChange(Math.max(1, Math.min(65_535, Math.round(parsed))))
+    }
+  }
+
+  return (
+    <div className="optional-field">
+      <label className="toggle-field">
+        <span>{label}</span>
+        <input
+          type="checkbox"
+          checked={value !== null}
+          onChange={(event) => onToggle(event.currentTarget.checked)}
+        />
+      </label>
+      {value !== null && (
+        <label className="field">
+          <span>Port</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="53127"
+            value={draft}
+            onBlur={() => {
+              if (!draft) setDraft(String(value))
+            }}
+            onChange={(event) => updateDraft(event.target.value)}
+          />
+        </label>
+      )}
     </div>
   )
 }
