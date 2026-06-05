@@ -2,9 +2,9 @@
 //  Keychain.swift
 //  Controllarr
 //
-//  Minimal wrapper around Security.framework keychain APIs for storing
-//  sensitive strings (WebUI password, future *arr API keys) outside the
-//  plaintext JSON state file.
+//  Minimal wrapper around Security.framework keychain APIs for legacy
+//  credential migration. Public ad-hoc builds must not trigger Keychain
+//  prompts during normal app use, so reads explicitly skip authentication UI.
 //
 
 import Foundation
@@ -21,6 +21,7 @@ public enum Keychain {
             kSecClass:       kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: key,
+            kSecUseAuthenticationUI: kSecUseAuthenticationUISkip,
         ]
         SecItemDelete(query as CFDictionary)
         var add = query
@@ -39,6 +40,7 @@ public enum Keychain {
             kSecAttrAccount: key,
             kSecReturnData:  true,
             kSecMatchLimit:  kSecMatchLimitOne,
+            kSecUseAuthenticationUI: kSecUseAuthenticationUISkip,
         ]
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -52,6 +54,7 @@ public enum Keychain {
             kSecClass:       kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: key,
+            kSecUseAuthenticationUI: kSecUseAuthenticationUISkip,
         ]
         SecItemDelete(query as CFDictionary)
     }

@@ -622,18 +622,11 @@ public enum QBittorrentAPI {
                     as? [String: Any] else {
                 return Response(status: .badRequest)
             }
-            // Handle password separately via Keychain
+            // Handle password separately so an omitted/blank field preserves
+            // the existing value. Stored inline to avoid ad-hoc Keychain
+            // prompts on remote WebUI login.
             if let v = dict["webUIPassword"] as? String, !v.isEmpty {
                 await services.store.setWebUIPassword(v)
-            }
-            // Handle *arr API keys via Keychain
-            if let endpoints = dict["arrEndpoints"] as? [[String: Any]] {
-                for ep in endpoints {
-                    if let name = ep["name"] as? String,
-                       let key = ep["apiKey"] as? String, !key.isEmpty {
-                        await services.store.setArrAPIKey(key, forEndpoint: name)
-                    }
-                }
             }
             let preferredPortToApply: UInt16? = {
                 guard dict.keys.contains("preferredListenPort"),
@@ -714,16 +707,22 @@ public enum QBittorrentAPI {
                 }
                 if let v = dict["diskSpaceMonitorPath"] as? String { s.diskSpaceMonitorPath = v }
                 if let v = dict["arrReSearchAfterHours"] as? Int { s.arrReSearchAfterHours = v }
-                // Update arr endpoint metadata (not keys — handled above)
+                // Update arr endpoint metadata and preserve existing keys
+                // unless a non-empty replacement key was submitted.
                 if let endpoints = dict["arrEndpoints"] as? [[String: Any]] {
                     s.arrEndpoints = endpoints.compactMap { ep in
                         guard let name = ep["name"] as? String,
                               let kindStr = ep["kind"] as? String,
                               let kind = ArrEndpoint.Kind(rawValue: kindStr),
                               let url = ep["baseURL"] as? String else { return nil }
+                        let existing = s.arrEndpoints.first { $0.name == name }
+                        let apiKey = (ep["apiKey"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                            ?? existing?.apiKey
+                            ?? ""
                         return ArrEndpoint(
                             name: name, kind: kind, baseURL: url,
-                            apiKeyInKeychain: true, apiKey: ""
+                            apiKeyInKeychain: false,
+                            apiKey: apiKey
                         )
                     }
                 }

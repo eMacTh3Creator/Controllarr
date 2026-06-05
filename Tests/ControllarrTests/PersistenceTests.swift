@@ -279,3 +279,57 @@ import Foundation
     #expect(result.endpointCount == 1)
     #expect(snapshot == backup.state)
 }
+
+@Test func testCredentialsStayInlineForPublicBuilds() async throws {
+    let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("controllarr-store-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let store = PersistenceStore(directory: tempDir)
+    await store.setWebUIPassword("remote-safe-password")
+    await store.updateSettings { settings in
+        settings.arrEndpoints = [
+            ArrEndpoint(name: "Sonarr", kind: .sonarr, baseURL: "http://sonarr.local:8989")
+        ]
+    }
+    await store.setArrAPIKey("sonarr-secret", forEndpoint: "Sonarr")
+
+    let snapshot = await store.snapshot()
+    let resolvedPassword = await store.resolvedWebUIPassword()
+    let resolvedArrKey = await store.arrAPIKey(forEndpoint: "Sonarr")
+
+    #expect(snapshot.settings.webUIPassword == "remote-safe-password")
+    #expect(resolvedPassword == "remote-safe-password")
+    #expect(snapshot.settings.arrEndpoints.first?.apiKey == "sonarr-secret")
+    #expect(snapshot.settings.arrEndpoints.first?.apiKeyInKeychain == false)
+    #expect(resolvedArrKey == "sonarr-secret")
+}
+
+@Test func testRestoreBackupClearsLegacyKeychainSentinels() async throws {
+    let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("controllarr-store-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let store = PersistenceStore(directory: tempDir)
+    var settings = Settings.defaults(homeDir: URL(fileURLWithPath: "/tmp/legacy"))
+    settings.webUIPassword = "__keychain__"
+    settings.arrEndpoints = [
+        ArrEndpoint(
+            name: "Radarr",
+            kind: .radarr,
+            baseURL: "http://radarr.local:7878",
+            apiKeyInKeychain: true,
+            apiKey: ""
+        )
+    ]
+
+    let backup = BackupArchive(state: PersistedState(settings: settings))
+    _ = try await store.restoreBackup(backup)
+    let snapshot = await store.snapshot()
+
+    #expect(snapshot.settings.webUIPassword == "adminadmin")
+    #expect(snapshot.settings.arrEndpoints.first?.apiKeyInKeychain == false)
+    #expect(snapshot.settings.arrEndpoints.first?.apiKey == "")
+}

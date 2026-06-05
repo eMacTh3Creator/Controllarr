@@ -225,7 +225,7 @@
           <h1>Mac-native torrent control for your <span class="arr">*arr</span> stack.</h1>
           <p class="lead">Controllarr is a native macOS BitTorrent client and qBittorrent-compatible API target built for Sonarr, Radarr, Overseerr, Plex, and operators who want a Mac mini to behave like a proper media-download node.</p>
           <div class="actions">
-            <a class="button primary" href="https://github.com/eMacTh3Creator/Controllarr/releases/download/v2.1.7/Controllarr-v2.1.7-macOS-arm64.zip" download>Download latest</a>
+            <a class="button primary" href="https://github.com/eMacTh3Creator/Controllarr/releases/download/v2.1.8/Controllarr-v2.1.8-macOS-arm64.zip" download>Download latest</a>
             <a class="button quiet" href="https://github.com/eMacTh3Creator/Controllarr">View on GitHub</a>
           </div>
           <div class="proof" aria-label="Project highlights">
@@ -315,7 +315,7 @@ GET /api/v2/torrents/info</pre>
             <div class="icon-orb">1K</div>
             <div>
               <h3>Large-library stability</h3>
-              <p>The latest release adds signed weekly update checks with an on/off switch, while keeping downloads operator-approved.</p>
+              <p>The latest release removes surprise Keychain prompts during remote WebUI/API login while keeping the signed weekly update flow operator-approved.</p>
             </div>
             <div class="signal-grid">
               <div class="signal-card"><strong>1,000+</strong><span>torrent guidance</span></div>
@@ -345,16 +345,16 @@ Login:  admin / adminadmin</pre>
         <div class="release-band">
           <div>
             <h2>What's new in the latest release</h2>
-            <p class="lead">Signed Sparkle updates now check weekly, prompt before download/install, and can be disabled from Settings.</p>
+            <p class="lead">Remote WebUI/API logins no longer trigger macOS Keychain prompts on the torrent Mac, and signed weekly update checks remain operator-controlled.</p>
             <div class="actions">
               <a class="button primary" href="https://github.com/eMacTh3Creator/Controllarr/releases/latest">Release notes</a>
               <a class="button quiet" href="https://github.com/eMacTh3Creator/Controllarr/blob/main/docs/PERFORMANCE.md">Performance guide</a>
             </div>
           </div>
           <ul class="release-list">
-            <li><span class="amber">01</span><span><b>Signed updates.</b> Sparkle verifies downloads with an Ed25519 update signature.</span></li>
-            <li><span class="amber">02</span><span><b>Weekly prompts.</b> Controllarr checks weekly and prompts instead of installing silently.</span></li>
-            <li><span class="amber">03</span><span><b>Operator control.</b> Settings includes an on/off switch for scheduled checks.</span></li>
+            <li><span class="amber">01</span><span><b>No login-time Keychain prompts.</b> WebUI and *arr credentials are read from app state instead of asking macOS during remote access.</span></li>
+            <li><span class="amber">02</span><span><b>Legacy-safe migration.</b> Older Keychain-backed credentials are imported only when macOS allows a silent read.</span></li>
+            <li><span class="amber">03</span><span><b>Signed updates stay simple.</b> Sparkle still verifies downloads and lets operators disable scheduled checks.</span></li>
             <li><span class="amber">04</span><span><b>Direct download.</b> The website button points straight at the current release zip.</span></li>
           </ul>
         </div>
@@ -401,7 +401,7 @@ Login:  admin / adminadmin</pre>
       <div>Controllarr. Take control. Stay private. Keep seeding.</div>
       <div class="footer-links">
         <a href="https://github.com/eMacTh3Creator/Controllarr">GitHub</a>
-        <a href="https://github.com/eMacTh3Creator/Controllarr/releases/download/v2.1.7/Controllarr-v2.1.7-macOS-arm64.zip" download>Download</a>
+        <a href="https://github.com/eMacTh3Creator/Controllarr/releases/download/v2.1.8/Controllarr-v2.1.8-macOS-arm64.zip" download>Download</a>
         <a href="https://github.com/eMacTh3Creator/Controllarr/tree/main/docs">Docs</a>
         <a href="https://github.com/eMacTh3Creator/Controllarr/blob/main/LICENSE">MIT License</a>
       </div>

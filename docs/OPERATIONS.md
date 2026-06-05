@@ -107,8 +107,9 @@ The WebUI Settings tab now includes a **Backup & restore** panel.
 ### Export
 
 - Use **Export backup** to download the current Controllarr state as JSON.
-- Turn on **Include Keychain secrets in exports** if you want the backup to carry the WebUI password and saved *arr API keys.
+- Turn on **Include saved secrets in exports** if you want the backup to carry the WebUI password and saved *arr API keys.
 - A redacted export is still useful for categories, save-path routing, seeding policy, health settings, and other non-secret state.
+- Public ad-hoc builds intentionally keep WebUI and *arr credentials in Controllarr state instead of reading them from Keychain during login. This prevents remote WebUI/API access from triggering macOS Keychain prompts on the torrent Mac.
 
 ### Import
 

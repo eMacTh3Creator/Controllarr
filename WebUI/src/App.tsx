@@ -1569,7 +1569,7 @@ function BackupAndRestoreSection({
       setStatus({
         tone: 'success',
         message: includeSecrets
-          ? 'Downloaded a full backup including Keychain-backed secrets.'
+          ? 'Downloaded a full backup including saved secrets.'
           : 'Downloaded a redacted backup without secrets.',
       })
     } catch (error: unknown) {
@@ -1623,7 +1623,7 @@ function BackupAndRestoreSection({
 
       <div className="form-grid">
         <label className="toggle-field">
-          <span>Include Keychain secrets in exports</span>
+          <span>Include saved secrets in exports</span>
           <input
             type="checkbox"
             checked={includeSecrets}

@@ -371,11 +371,11 @@ public struct ArrEndpoint: Codable, Sendable, Equatable, Identifiable {
     }
     public var kind: Kind
     public var baseURL: String
-    /// When true, the API key lives in Keychain under "arr_<name>".
-    /// The `apiKey` field below is only used for initial setup / migration.
+    /// Legacy flag from older builds that stored the API key in Keychain.
+    /// Current public builds store credentials inline to avoid macOS prompts.
     public var apiKeyInKeychain: Bool
-    /// Plaintext API key — only used during initial setup. Once migrated
-    /// to Keychain this is cleared to empty.
+    /// Saved API key for this endpoint. Treat backups that include secrets
+    /// carefully because this value is intentionally portable operator state.
     public var apiKey: String
 
     public init(
@@ -785,22 +785,22 @@ public actor PersistenceStore {
 
         try? FileManager.default.createDirectory(at: resumeDir, withIntermediateDirectories: true)
 
-        // One-time migration: move plaintext password into Keychain.
-        // Inlined here because actor init is nonisolated in Swift 6 and
-        // we can only access stored properties directly (no actor-isolated
-        // method calls).
-        let pwd = state.settings.webUIPassword
-        if !pwd.isEmpty && pwd != "__keychain__" {
-            Keychain.set(pwd, forKey: Keychain.webUIPasswordKey)
-            state.settings.webUIPassword = "__keychain__"
+        // Legacy migration: older builds moved credentials into Keychain.
+        // Ad-hoc public releases may be seen as a different accessor after
+        // every update, causing scary prompts on WebUI login. Migrate any
+        // silently readable secrets back into state and never display
+        // Keychain UI. If the old password cannot be read without prompting,
+        // reset to the default so the operator can log in and choose a new one.
+        if state.settings.webUIPassword == "__keychain__" {
+            state.settings.webUIPassword =
+                Keychain.get(forKey: Keychain.webUIPasswordKey) ?? "adminadmin"
             _needsFlush = true
         }
         for i in state.settings.arrEndpoints.indices {
             let ep = state.settings.arrEndpoints[i]
-            if !ep.apiKey.isEmpty && !ep.apiKeyInKeychain {
-                Keychain.set(ep.apiKey, forKey: "arr_\(ep.name)")
-                state.settings.arrEndpoints[i].apiKey = ""
-                state.settings.arrEndpoints[i].apiKeyInKeychain = true
+            if ep.apiKeyInKeychain {
+                state.settings.arrEndpoints[i].apiKey = Keychain.get(forKey: "arr_\(ep.name)") ?? ""
+                state.settings.arrEndpoints[i].apiKeyInKeychain = false
                 _needsFlush = true
             }
         }
@@ -824,34 +824,43 @@ public actor PersistenceStore {
 
     // MARK: Credential helpers
 
-    /// Returns the actual WebUI password (from Keychain if migrated,
-    /// fallback to the JSON field for pre-migration state files).
+    /// Returns the configured WebUI password. Legacy Keychain-backed values
+    /// are resolved with authentication UI disabled so remote login never
+    /// causes a Keychain prompt.
     public func resolvedWebUIPassword() -> String {
         if state.settings.webUIPassword == "__keychain__" {
-            return Keychain.get(forKey: Keychain.webUIPasswordKey) ?? ""
+            return Keychain.get(forKey: Keychain.webUIPasswordKey) ?? "adminadmin"
         }
         return state.settings.webUIPassword
     }
 
-    /// Store a new WebUI password in Keychain and mark the JSON sentinel.
+    /// Store a new WebUI password inline. This intentionally avoids Keychain
+    /// for ad-hoc public builds, where app identity changes can cause repeated
+    /// user prompts.
     public func setWebUIPassword(_ password: String) {
-        Keychain.set(password, forKey: Keychain.webUIPasswordKey)
-        state.settings.webUIPassword = "__keychain__"
+        state.settings.webUIPassword = password
         scheduleFlush()
     }
 
-    /// Retrieve the API key for a named *arr endpoint from Keychain.
+    /// Retrieve the API key for a named *arr endpoint.
     public func arrAPIKey(forEndpoint name: String) -> String {
-        Keychain.get(forKey: "arr_\(name)") ?? ""
+        guard let endpoint = state.settings.arrEndpoints.first(where: { $0.name == name }) else {
+            return ""
+        }
+        if !endpoint.apiKey.isEmpty {
+            return endpoint.apiKey
+        }
+        if endpoint.apiKeyInKeychain {
+            return Keychain.get(forKey: "arr_\(name)") ?? ""
+        }
+        return ""
     }
 
-    /// Store an API key for a named *arr endpoint in Keychain.
+    /// Store an API key for a named *arr endpoint inline.
     public func setArrAPIKey(_ key: String, forEndpoint name: String) {
-        Keychain.set(key, forKey: "arr_\(name)")
-        // Mark the endpoint as migrated.
         if let i = state.settings.arrEndpoints.firstIndex(where: { $0.name == name }) {
-            state.settings.arrEndpoints[i].apiKeyInKeychain = true
-            state.settings.arrEndpoints[i].apiKey = ""
+            state.settings.arrEndpoints[i].apiKeyInKeychain = false
+            state.settings.arrEndpoints[i].apiKey = key
             scheduleFlush()
         }
     }
@@ -873,7 +882,9 @@ public actor PersistenceStore {
         if includeSecrets {
             var arrAPIKeys: [String: String] = [:]
             for endpoint in state.settings.arrEndpoints {
-                let key = Keychain.get(forKey: "arr_\(endpoint.name)") ?? ""
+                let key = endpoint.apiKey.isEmpty && endpoint.apiKeyInKeychain
+                    ? (Keychain.get(forKey: "arr_\(endpoint.name)") ?? "")
+                    : endpoint.apiKey
                 if !key.isEmpty {
                     arrAPIKeys[endpoint.name] = key
                 }
@@ -941,24 +952,23 @@ public actor PersistenceStore {
         var restoredState = backup.state
 
         if let password = backup.secrets?.webUIPassword, !password.isEmpty {
-            Keychain.set(password, forKey: Keychain.webUIPasswordKey)
-            restoredState.settings.webUIPassword = "__keychain__"
+            restoredState.settings.webUIPassword = password
         } else if !restoredState.settings.webUIPassword.isEmpty,
                   restoredState.settings.webUIPassword != "__keychain__" {
-            Keychain.set(restoredState.settings.webUIPassword, forKey: Keychain.webUIPasswordKey)
-            restoredState.settings.webUIPassword = "__keychain__"
+            // Keep plaintext backup state as-is. Do not migrate to Keychain.
+        } else if restoredState.settings.webUIPassword == "__keychain__" {
+            restoredState.settings.webUIPassword = "adminadmin"
         }
 
         for index in restoredState.settings.arrEndpoints.indices {
             let endpoint = restoredState.settings.arrEndpoints[index]
             if let apiKey = backup.secrets?.arrAPIKeys[endpoint.name], !apiKey.isEmpty {
-                Keychain.set(apiKey, forKey: "arr_\(endpoint.name)")
-                restoredState.settings.arrEndpoints[index].apiKeyInKeychain = true
-                restoredState.settings.arrEndpoints[index].apiKey = ""
+                restoredState.settings.arrEndpoints[index].apiKeyInKeychain = false
+                restoredState.settings.arrEndpoints[index].apiKey = apiKey
             } else if !endpoint.apiKey.isEmpty {
-                Keychain.set(endpoint.apiKey, forKey: "arr_\(endpoint.name)")
-                restoredState.settings.arrEndpoints[index].apiKeyInKeychain = true
-                restoredState.settings.arrEndpoints[index].apiKey = ""
+                restoredState.settings.arrEndpoints[index].apiKeyInKeychain = false
+            } else if endpoint.apiKeyInKeychain {
+                restoredState.settings.arrEndpoints[index].apiKeyInKeychain = false
             }
         }
 
