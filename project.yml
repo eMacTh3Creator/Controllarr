@@ -17,8 +17,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "2.1.6"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "2.1.7"
+    CURRENT_PROJECT_VERSION: "217"
     ONLY_ACTIVE_ARCH: YES
     ENABLE_HARDENED_RUNTIME: YES
     # Ad-hoc sign by default so the .app runs locally without a
@@ -61,6 +61,10 @@ targets:
         NSSupportsSuddenTermination: NO
         SUFeedURL: "https://raw.githubusercontent.com/eMacTh3Creator/Controllarr/main/appcast.xml"
         SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 604800
+        SUAutomaticallyUpdate: false
+        SUAllowsAutomaticUpdates: false
+        SUPublicEDKey: "CWXWjCDmL1aVlJmeeeUBSVFp3FWOBCmhHC82OAmQBkc="
     dependencies:
       - package: Controllarr
         product: ControllarrCore

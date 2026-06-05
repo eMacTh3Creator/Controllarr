@@ -446,6 +446,9 @@ final class RuntimeViewModel {
         if let delegate = NSApp.delegate as? AppDelegate {
             delegate.applyInterfacePreferences()
         }
+        await MainActor.run {
+            UpdateManager.shared.apply(settings: newSettings)
+        }
     }
 
     func clearHealthIssue(hash: String) async {

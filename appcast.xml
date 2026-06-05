@@ -4,15 +4,17 @@
     <title>Controllarr Updates</title>
     <description>Automatic update feed for Controllarr.</description>
     <language>en</language>
+    <link>https://emacth3creator.github.io/Controllarr/</link>
     <item>
-      <title>Version 1.0.0</title>
-      <sparkle:version>1</sparkle:version>
-      <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
-      <sparkle:releaseNotesLink>https://github.com/eMacTh3Creator/Controllarr/releases/tag/v1.0.0</sparkle:releaseNotesLink>
-      <pubDate>Tue, 15 Apr 2026 22:00:00 +0000</pubDate>
+      <title>Version 2.1.7</title>
+      <sparkle:version>217</sparkle:version>
+      <sparkle:shortVersionString>2.1.7</sparkle:shortVersionString>
+      <sparkle:releaseNotesLink>https://github.com/eMacTh3Creator/Controllarr/releases/tag/v2.1.7</sparkle:releaseNotesLink>
+      <pubDate>Fri, 05 Jun 2026 00:04:03 GMT</pubDate>
       <enclosure
-        url="https://github.com/eMacTh3Creator/Controllarr/releases/download/v1.0.0/Controllarr-v1.0.0-macOS-arm64.zip"
-        length="0"
+        url="https://github.com/eMacTh3Creator/Controllarr/releases/download/v2.1.7/Controllarr-v2.1.7-macOS-arm64.zip"
+        sparkle:edSignature="epFqZ1wz1129nHqE8EJbE+BXz1Qvnfevmmjm1qj4H0Ci/PdSR+hMstIWYgyzw8q6HAK53TjJbFnluztTm800Aw=="
+        length="11868517"
         type="application/octet-stream" />
     </item>
   </channel>

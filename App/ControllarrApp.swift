@@ -11,20 +11,14 @@
 import SwiftUI
 import AppKit
 import ControllarrCore
-import Sparkle
 
 @main
 struct ControllarrApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
-    private let updaterController: SPUStandardUpdaterController
+    private let updateManager = UpdateManager.shared
 
     init() {
-        updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
-        )
     }
 
     var body: some Scene {
@@ -35,7 +29,7 @@ struct ControllarrApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(after: .appInfo) {
-                CheckForUpdatesView(updater: updaterController.updater)
+                CheckForUpdatesView(updater: updateManager.updater)
             }
         }
     }

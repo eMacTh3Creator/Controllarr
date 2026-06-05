@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
                 self.attachToMainWindow()
                 self.applyInterfacePreferences()
+                UpdateManager.shared.apply(settings: RuntimeViewModel.shared.settings)
             }
         }
     }

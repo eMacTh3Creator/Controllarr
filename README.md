@@ -41,7 +41,7 @@ The project is built around a common media-server pain point: torrent traffic sh
 - **Large-library tuning** with shared torrent snapshots, reduced tracker/DNS pressure, staggered reannounce behavior, and lower-overhead polling.
 - **Torrent detail panes** for files, trackers, and peers, including per-file priority controls.
 - **Bandwidth scheduler**, connection limits, peer-discovery toggles, duplicate detection, force recheck, and force resume.
-- **Keychain-backed secrets**, session auth, WebUI hardening, backup export/restore, and Sparkle auto-update support.
+- **Keychain-backed secrets**, session auth, WebUI hardening, backup export/restore, and weekly Sparkle update prompts.
 - **Headless daemon mode** for always-on nodes that do not need the full app window.
 
 ## Quick Install
@@ -58,6 +58,9 @@ xattr -rd com.apple.quarantine /Applications/Controllarr.app
 ```
 
 The app is currently ad-hoc signed. If you install it somewhere other than `/Applications`, replace the path in both commands.
+
+Controllarr checks weekly for signed Sparkle updates and prompts when a newer
+release is available. It does not silently install updates.
 
 ## First Run
 
@@ -121,6 +124,7 @@ This design separates control traffic from torrent traffic: the API/WebUI can be
 
 Recent release line:
 
+- **v2.1.7:** signed Sparkle appcast, weekly update checks, an on/off switch, and prompted downloads.
 - **v2.1.6:** consistent typed port inputs across native and WebUI.
 - **v2.1.5:** preferred forwarded-port text box hotfix.
 - **v2.1.4:** preferred VPN forwarded-port support.

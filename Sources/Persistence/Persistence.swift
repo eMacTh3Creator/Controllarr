@@ -281,6 +281,9 @@ public struct UIPreferences: Codable, Sendable, Equatable {
     /// any other value matches torrents whose assigned category name
     /// exactly equals this string.
     public var torrentCategoryFilter: String
+    /// When true, Sparkle may perform scheduled update checks and prompt
+    /// when a signed release is available. Manual checks remain available.
+    public var automaticUpdateChecks: Bool
 
     public init(
         menuBarEnabled: Bool = true,
@@ -290,7 +293,8 @@ public struct UIPreferences: Codable, Sendable, Equatable {
         torrentSortKey: String? = nil,
         torrentSortAscending: Bool = true,
         torrentStatusFilter: String = "all",
-        torrentCategoryFilter: String = ""
+        torrentCategoryFilter: String = "",
+        automaticUpdateChecks: Bool = true
     ) {
         self.menuBarEnabled = menuBarEnabled
         self.startMinimized = startMinimized
@@ -300,6 +304,7 @@ public struct UIPreferences: Codable, Sendable, Equatable {
         self.torrentSortAscending = torrentSortAscending
         self.torrentStatusFilter = torrentStatusFilter
         self.torrentCategoryFilter = torrentCategoryFilter
+        self.automaticUpdateChecks = automaticUpdateChecks
     }
 
     // Custom decoder so adding new fields doesn't break forward-compat
@@ -314,6 +319,7 @@ public struct UIPreferences: Codable, Sendable, Equatable {
         self.torrentSortAscending = try c.decodeIfPresent(Bool.self, forKey: .torrentSortAscending) ?? true
         self.torrentStatusFilter = try c.decodeIfPresent(String.self, forKey: .torrentStatusFilter) ?? "all"
         self.torrentCategoryFilter = try c.decodeIfPresent(String.self, forKey: .torrentCategoryFilter) ?? ""
+        self.automaticUpdateChecks = try c.decodeIfPresent(Bool.self, forKey: .automaticUpdateChecks) ?? true
     }
 }
 

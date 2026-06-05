@@ -1665,6 +1665,11 @@ struct SettingsView: View {
                 Text("Launches Controllarr without showing the main window. Requires the menu-bar icon to be enabled.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Updates") {
+                Toggle("Check weekly for updates", isOn: binding.uiPreferences.automaticUpdateChecks)
+                Text("When enabled, Controllarr uses Sparkle to check weekly and prompt when a signed update is available. Updates are not installed silently, and manual checks remain available from the app menu.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }

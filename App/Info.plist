@@ -36,9 +36,17 @@
 	<false/>
 	<key>NSSupportsSuddenTermination</key>
 	<false/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<false/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>
 	<string>https://raw.githubusercontent.com/eMacTh3Creator/Controllarr/main/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>CWXWjCDmL1aVlJmeeeUBSVFp3FWOBCmhHC82OAmQBkc=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>604800</integer>
 </dict>
 </plist>

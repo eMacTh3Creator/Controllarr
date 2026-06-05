@@ -80,6 +80,26 @@ the preferred port.
 Leave the field blank if your VPN does not provide a forwarded port or if the
 port changes too often to manage manually.
 
+## Automatic Updates
+
+Controllarr uses Sparkle for signed update checks. When enabled in
+**Settings -> Interface -> Updates**, the app checks weekly and prompts when a
+newer release is available; it does not silently install updates.
+
+The public Sparkle key is embedded in the app bundle. The private signing key is
+stored in the release maintainer's macOS Keychain under
+`com.controllarr.updates` and is not committed to the repository.
+Local release signing may trigger a one-time Keychain prompt for Sparkle's
+`sign_update` tool. Installed Controllarr apps do not use the private key and
+will not prompt users for Keychain access during weekly update checks.
+
+For CI-based releases, set `SPARKLE_PRIVATE_KEY` as a secret and run
+`Scripts/update-appcast.py`; the script will sign from standard input instead
+of using the local Keychain.
+
+Users on builds older than v2.1.7 may need to install v2.1.7 manually once
+before weekly prompted updates are fully trusted.
+
 ## Backup, Export, and Restore
 
 The WebUI Settings tab now includes a **Backup & restore** panel.

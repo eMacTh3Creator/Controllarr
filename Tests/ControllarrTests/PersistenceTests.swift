@@ -15,6 +15,7 @@ import Foundation
     #expect(s.listenPortRangeStart > 0)
     #expect(s.listenPortRangeEnd > s.listenPortRangeStart)
     #expect(s.preferredListenPort == nil)
+    #expect(s.uiPreferences.automaticUpdateChecks)
     #expect(s.webUIPort > 0)
     #expect(s.stallThresholdMinutes > 0)
     #expect(!s.defaultSavePath.isEmpty)
@@ -53,6 +54,7 @@ import Foundation
     #expect(s.listenPortRangeStart == 49152)
     #expect(s.listenPortRangeEnd == 65000)
     #expect(s.preferredListenPort == nil)
+    #expect(s.uiPreferences.automaticUpdateChecks)
     #expect(s.stallThresholdMinutes == 10)
     #expect(s.defaultSavePath == "/tmp/downloads")
     #expect(s.webUIHost == "127.0.0.1")
@@ -86,7 +88,7 @@ import Foundation
         maxDownloadKBps: 5000,
         maxUploadKBps: 1000
     )
-    let original = Settings(
+    var original = Settings(
         listenPortRangeStart: 50000,
         listenPortRangeEnd: 60000,
         preferredListenPort: 53127,
@@ -112,6 +114,7 @@ import Foundation
         ],
         bandwidthSchedule: [rule]
     )
+    original.uiPreferences.automaticUpdateChecks = false
     let encoder = JSONEncoder()
     encoder.outputFormatting = .sortedKeys
     let data = try encoder.encode(original)
