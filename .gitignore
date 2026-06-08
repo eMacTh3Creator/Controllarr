@@ -46,3 +46,7 @@ Controllarr ?.xcodeproj/
 .idea/
 *.swp
 *.zip
+
+# Locally built patched libtorrent (regenerate with scripts/build-patched-libtorrent.sh).
+# Large, arch-specific, and reproducible from patches/ — not checked in.
+vendor/

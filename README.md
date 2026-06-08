@@ -124,6 +124,7 @@ This design separates control traffic from torrent traffic: the API/WebUI can be
 
 Recent release line:
 
+- **v2.1.11:** embeds a defensively hardened libtorrent 2.0.12 (re-entrancy-safe DNS resolver callback handling) for large-library crash resistance.
 - **v2.1.10:** resolver-mode hysteresis so large libraries no longer flap protection near the threshold, lower-overhead session stats, and a clear notice when a legacy WebUI password is reset during migration.
 - **v2.1.9:** adds automatic conservative resolver protection for 650+ torrent sessions to prevent VPN/DNS resolver crashes.
 - **v2.1.8:** removes remote-login Keychain prompts by keeping WebUI and *arr credentials in portable app state.
@@ -186,6 +187,26 @@ open /tmp/ControllarrBuild/Build/Products/Release/Controllarr.app
 ```
 
 The build embeds Homebrew libtorrent/OpenSSL dylibs into the app bundle and rewrites load paths so the release app is self-contained.
+
+### Patched libtorrent (optional, used by official releases)
+
+Official release builds embed a locally built, defensively hardened libtorrent
+2.0.12 (`patches/libtorrent-2.0.12-resolver-reentrancy.patch`) instead of the
+stock Homebrew dylib. It makes `resolver::on_lookup` re-entrancy-safe as
+extra insurance on large 700+ torrent libraries. The two are the same version
+and ABI-identical, so the app still links against Homebrew at build time and
+only the *embedded* runtime copy changes.
+
+To produce it (requires `cmake`):
+
+```sh
+brew install cmake
+./scripts/build-patched-libtorrent.sh   # installs into vendor/libtorrent-patched/
+```
+
+`scripts/embed-dylibs.sh` automatically prefers `vendor/libtorrent-patched/`
+when present and silently falls back to the Homebrew dylib otherwise, so this
+step is optional for local development.
 
 SwiftPM test/build commands:
 

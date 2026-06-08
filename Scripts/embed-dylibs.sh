@@ -17,9 +17,25 @@ APP="${1:?Usage: embed-dylibs.sh /path/to/Controllarr.app}"
 FRAMEWORKS="$APP/Contents/Frameworks"
 MACHO="$APP/Contents/MacOS/Controllarr"
 BREW="/opt/homebrew"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Source paths
-SRC_LT="$BREW/opt/libtorrent-rasterbar/lib/libtorrent-rasterbar.2.0.dylib"
+# Source paths.
+#
+# Prefer the project's patched libtorrent (vendor/libtorrent-patched) when it
+# has been built — it carries a defensive re-entrancy hardening of
+# resolver::on_lookup for large-library stability. Fall back to the stock
+# Homebrew dylib otherwise. Build the patched copy with
+# scripts/build-patched-libtorrent.sh. Both are libtorrent 2.0.12 and
+# ABI-identical, so the app can link the Homebrew copy and embed either.
+SRC_LT_VENDOR="$ROOT/vendor/libtorrent-patched/lib/libtorrent-rasterbar.2.0.dylib"
+SRC_LT_BREW="$BREW/opt/libtorrent-rasterbar/lib/libtorrent-rasterbar.2.0.dylib"
+if [ -f "$SRC_LT_VENDOR" ]; then
+    SRC_LT="$SRC_LT_VENDOR"
+    echo "  Using patched libtorrent: $SRC_LT_VENDOR"
+else
+    SRC_LT="$SRC_LT_BREW"
+    echo "  Using Homebrew libtorrent (patched copy not built): $SRC_LT_BREW"
+fi
 SRC_SSL="$BREW/opt/openssl@3/lib/libssl.3.dylib"
 SRC_CRYPTO="$BREW/opt/openssl@3/lib/libcrypto.3.dylib"
 
