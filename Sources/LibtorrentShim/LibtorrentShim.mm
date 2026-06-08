@@ -167,19 +167,39 @@ static int ctrl_unqueued_torrent_limit() {
     return 10000;
 }
 
-static int ctrl_background_tracker_limit() {
+static int ctrl_conservative_torrent_threshold() {
+    return 650;
+}
+
+static int ctrl_background_tracker_limit(BOOL conservative = NO) {
     // Keep tracker hostname resolution deliberately conservative. Crash
     // reports from 700+ torrent libraries point at libtorrent's resolver
     // callback map under sustained DNS/mDNS pressure.
-    return 12;
+    return conservative ? 3 : 12;
 }
 
-static int ctrl_background_dht_limit() {
-    return 24;
+static int ctrl_background_dht_limit(BOOL conservative = NO) {
+    return conservative ? 6 : 24;
 }
 
-static int ctrl_background_lsd_limit() {
-    return 8;
+static int ctrl_background_lsd_limit(BOOL conservative = NO) {
+    return conservative ? 0 : 8;
+}
+
+static int ctrl_http_announce_limit(BOOL conservative = NO) {
+    return conservative ? 2 : 6;
+}
+
+static int ctrl_min_announce_interval(BOOL conservative = NO) {
+    return conservative ? 1800 : 900;
+}
+
+static int ctrl_tracker_backoff(BOOL conservative = NO) {
+    return conservative ? 600 : 250;
+}
+
+static int ctrl_resolver_cache_timeout(BOOL conservative = NO) {
+    return conservative ? 7200 : 3600;
 }
 
 static int ctrl_background_checking_limit() {
@@ -208,6 +228,7 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
     NSString *_metadataDir;   // Sidecar directory for .magnet / .torrent fallbacks.
     uint16_t  _listenPort;
     BOOL      _bindAll;
+    BOOL      _conservativeResolverMode;
     // Cheap cache so statsForInfoHash: and moveTorrent: don't have to
     // rescan get_torrents() every call.
     std::unordered_map<std::string, lt::torrent_handle> _handlesByHash;
@@ -263,11 +284,12 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
         _savePath   = [savePath copy];
         _listenPort = port;
         _bindAll    = bindAll;
+        _conservativeResolverMode = NO;
 
         lt::settings_pack pack;
         pack.set_str(lt::settings_pack::listen_interfaces,
                      ctrl_build_listen_interfaces(port, bindAll).UTF8String);
-        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.1.8 libtorrent/2.0");
+        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.1.9 libtorrent/2.0");
         pack.set_int(lt::settings_pack::alert_mask,
                      lt::alert_category::error
                      | lt::alert_category::status
@@ -278,10 +300,10 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
         pack.set_int(lt::settings_pack::hashing_threads, ctrl_balanced_hashing_threads());
         pack.set_bool(lt::settings_pack::announce_to_all_tiers, false);
         pack.set_bool(lt::settings_pack::announce_to_all_trackers, false);
-        pack.set_int(lt::settings_pack::min_announce_interval, 900);
-        pack.set_int(lt::settings_pack::tracker_backoff, 250);
-        pack.set_int(lt::settings_pack::resolver_cache_timeout, 3600);
-        pack.set_int(lt::settings_pack::max_concurrent_http_announces, 6);
+        pack.set_int(lt::settings_pack::min_announce_interval, ctrl_min_announce_interval());
+        pack.set_int(lt::settings_pack::tracker_backoff, ctrl_tracker_backoff());
+        pack.set_int(lt::settings_pack::resolver_cache_timeout, ctrl_resolver_cache_timeout());
+        pack.set_int(lt::settings_pack::max_concurrent_http_announces, ctrl_http_announce_limit());
         // Respect NAT-PMP / UPnP so the port watcher has something to
         // cross-check against.
         pack.set_bool(lt::settings_pack::enable_upnp, true);
@@ -316,6 +338,46 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
     return self;
 }
 
+- (void)applyResolverModeForTorrentCount:(NSUInteger)torrentCount
+                                  reason:(NSString *)reason {
+    if (!_session) return;
+    BOOL shouldConserve = torrentCount >= (NSUInteger)ctrl_conservative_torrent_threshold();
+    if (shouldConserve == _conservativeResolverMode) return;
+
+    _conservativeResolverMode = shouldConserve;
+
+    lt::settings_pack pack;
+    pack.set_bool(lt::settings_pack::announce_to_all_tiers, false);
+    pack.set_bool(lt::settings_pack::announce_to_all_trackers, false);
+    pack.set_int(lt::settings_pack::active_tracker_limit,
+                 ctrl_background_tracker_limit(_conservativeResolverMode));
+    pack.set_int(lt::settings_pack::active_dht_limit,
+                 ctrl_background_dht_limit(_conservativeResolverMode));
+    pack.set_int(lt::settings_pack::active_lsd_limit,
+                 ctrl_background_lsd_limit(_conservativeResolverMode));
+    pack.set_int(lt::settings_pack::min_announce_interval,
+                 ctrl_min_announce_interval(_conservativeResolverMode));
+    pack.set_int(lt::settings_pack::tracker_backoff,
+                 ctrl_tracker_backoff(_conservativeResolverMode));
+    pack.set_int(lt::settings_pack::resolver_cache_timeout,
+                 ctrl_resolver_cache_timeout(_conservativeResolverMode));
+    pack.set_int(lt::settings_pack::max_concurrent_http_announces,
+                 ctrl_http_announce_limit(_conservativeResolverMode));
+    _session->apply_settings(std::move(pack));
+
+    NSLog(
+        @"[Controllarr] resolver protection %@ at %lu torrents (%@): trackerLimit=%d dhtLimit=%d httpAnnounces=%d minAnnounce=%d resolverCache=%d",
+        _conservativeResolverMode ? @"enabled" : @"relaxed",
+        (unsigned long)torrentCount,
+        reason ?: @"unknown",
+        ctrl_background_tracker_limit(_conservativeResolverMode),
+        ctrl_background_dht_limit(_conservativeResolverMode),
+        ctrl_http_announce_limit(_conservativeResolverMode),
+        ctrl_min_announce_interval(_conservativeResolverMode),
+        ctrl_resolver_cache_timeout(_conservativeResolverMode)
+    );
+}
+
 // MARK: Adding
 
 - (BOOL)addMagnet:(NSString *)magnetURI
@@ -336,6 +398,8 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
     }
     std::string ih = h.info_hashes().get_best().to_string();
     _handlesByHash[ih] = h;
+    [self applyResolverModeForTorrentCount:_session->get_torrents().size()
+                                    reason:@"magnet add"];
     // Write a sidecar so a crash / force-quit before metadata arrives
     // still lets us re-add this torrent on next launch.
     [self writeMagnetSidecarFor:ctrl_hex_from_bytes(ih)
@@ -359,6 +423,8 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
         }
         std::string ih = h.info_hashes().get_best().to_string();
         _handlesByHash[ih] = h;
+        [self applyResolverModeForTorrentCount:_session->get_torrents().size()
+                                        reason:@"torrent add"];
         // Copy the .torrent into the metadata dir so a crash before any
         // .fastresume is written still leaves a recoverable sidecar.
         [self writeTorrentSidecarFor:ctrl_hex_from_bytes(ih)
@@ -763,6 +829,7 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
 
 - (NSArray<CTRLTorrentStats *> *)pollStats {
     std::vector<lt::torrent_handle> handles = _session->get_torrents();
+    [self applyResolverModeForTorrentCount:handles.size() reason:@"poll"];
     NSMutableArray *out = [NSMutableArray arrayWithCapacity:handles.size()];
     for (auto const &h : handles) {
         if (!h.is_valid()) continue;
@@ -783,6 +850,9 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
 }
 
 - (CTRLSessionStats *)sessionStats {
+    [self applyResolverModeForTorrentCount:_session->get_torrents().size()
+                                    reason:@"session stats"];
+
     CTRLSessionStats *s = [CTRLSessionStats new];
     s.listenPort = _listenPort;
 
@@ -924,9 +994,9 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
     int s = enabled ? (activeSeeds     > 0 ? activeSeeds     : 5)  : ctrl_unqueued_torrent_limit();
     int a = enabled ? (activeLimit     > 0 ? activeLimit     : 15) : ctrl_unqueued_torrent_limit();
     int checking = ctrl_limited_checking_cap(enabled, a);
-    int trackers = ctrl_limited_background_cap(enabled, a, ctrl_background_tracker_limit());
-    int dht = ctrl_limited_background_cap(enabled, a, ctrl_background_dht_limit());
-    int lsd = ctrl_limited_background_cap(enabled, a, ctrl_background_lsd_limit());
+    int trackers = ctrl_limited_background_cap(enabled, a, ctrl_background_tracker_limit(_conservativeResolverMode));
+    int dht = ctrl_limited_background_cap(enabled, a, ctrl_background_dht_limit(_conservativeResolverMode));
+    int lsd = ctrl_limited_background_cap(enabled, a, ctrl_background_lsd_limit(_conservativeResolverMode));
     pack.set_int(lt::settings_pack::active_downloads,    d);
     pack.set_int(lt::settings_pack::active_seeds,        s);
     pack.set_int(lt::settings_pack::active_limit,        a);
@@ -940,17 +1010,19 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
 }
 
 - (void)forceReannounceAll {
-    // Tracker reannounce with ignore_min_interval so we bypass the
-    // announce-interval backoff and hit every tracker immediately.
-    // Also kick DHT and LSD announces so peers learn the new listen
-    // port through every available discovery channel — this is the
-    // "actively reconnect" behavior the port-cycle flow needs.
     std::vector<lt::torrent_handle> handles = _session->get_torrents();
+    [self applyResolverModeForTorrentCount:handles.size() reason:@"mass reannounce"];
+
+    // Tracker reannounce with ignore_min_interval, but stagger heavily in
+    // conservative resolver mode so a port cycle cannot queue hundreds of
+    // DNS lookups against VPN DNS at once.
     int idx = 0;
-    int dhtLimit = ctrl_background_dht_limit();
+    int batchSize = _conservativeResolverMode ? 1 : 4;
+    int maxDelaySeconds = _conservativeResolverMode ? 1800 : 600;
+    int dhtLimit = _conservativeResolverMode ? 0 : ctrl_background_dht_limit();
     for (auto const &h : handles) {
         if (!h.is_valid()) continue;
-        int delaySeconds = MIN(idx / 4, 600);
+        int delaySeconds = MIN(idx / batchSize, maxDelaySeconds);
         try {
             h.force_reannounce(delaySeconds, -1, lt::torrent_handle::ignore_min_interval);
         } catch (...) {
@@ -964,7 +1036,11 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
         }
         idx += 1;
     }
-    NSLog(@"[Controllarr] force reannounce scheduled %lu torrents in staggered batches", handles.size());
+    NSLog(
+        @"[Controllarr] force reannounce scheduled %lu torrents in %@ batches",
+        handles.size(),
+        _conservativeResolverMode ? @"conservative" : @"standard"
+    );
 }
 
 // MARK: Alerts
@@ -1031,6 +1107,15 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
 - (void)loadResumeDataFrom:(NSString *)directory {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSArray<NSString *> *entries = [fm contentsOfDirectoryAtPath:directory error:nil] ?: @[];
+    NSUInteger plannedAdds = 0;
+    for (NSString *entry in entries) {
+        if ([entry hasSuffix:@".fastresume"] ||
+            [entry hasSuffix:@".magnet"] ||
+            [entry hasSuffix:@".torrent"]) {
+            plannedAdds += 1;
+        }
+    }
+    [self applyResolverModeForTorrentCount:plannedAdds reason:@"resume preflight"];
 
     // Track every info hash we successfully add so the sidecar sweep
     // below can skip duplicates (libtorrent would otherwise reject them).
@@ -1056,6 +1141,8 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
                 std::string ih = h.info_hashes().get_best().to_string();
                 _handlesByHash[ih] = h;
                 [loadedHashes addObject:ctrl_hex_from_bytes(ih)];
+                [self applyResolverModeForTorrentCount:loadedHashes.count
+                                                reason:@"resume load"];
             }
         } catch (std::exception const &e) {
             NSLog(@"[Controllarr] resume load threw: %s", e.what());
@@ -1090,6 +1177,8 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
             std::string ih = h.info_hashes().get_best().to_string();
             _handlesByHash[ih] = h;
             [loadedHashes addObject:ctrl_hex_from_bytes(ih)];
+            [self applyResolverModeForTorrentCount:loadedHashes.count
+                                            reason:@"magnet sidecar load"];
             NSLog(@"[Controllarr] restored magnet from sidecar: %@", hashHex);
         }
     }
@@ -1118,6 +1207,8 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
                 std::string ih = h.info_hashes().get_best().to_string();
                 _handlesByHash[ih] = h;
                 [loadedHashes addObject:ctrl_hex_from_bytes(ih)];
+                [self applyResolverModeForTorrentCount:loadedHashes.count
+                                                reason:@"torrent sidecar load"];
                 NSLog(@"[Controllarr] restored .torrent from sidecar: %@", hashHex);
             }
         } catch (std::exception const &e) {

@@ -12,6 +12,7 @@ This folder holds the higher-level product and planning docs that sit alongside 
 
 ## Release Notes
 
+- [../RELEASE_NOTES_v2.1.9.md](../RELEASE_NOTES_v2.1.9.md) — automatic conservative resolver protection for 650+ torrent sessions
 - [../RELEASE_NOTES_v2.1.8.md](../RELEASE_NOTES_v2.1.8.md) — removes remote-login Keychain prompts for WebUI and *arr credentials
 - [../RELEASE_NOTES_v2.1.7.md](../RELEASE_NOTES_v2.1.7.md) — signed Sparkle appcast, weekly update prompts, and an update-check toggle
 - [../RELEASE_NOTES_v2.1.6.md](../RELEASE_NOTES_v2.1.6.md) — consistent typed port inputs across native and WebUI

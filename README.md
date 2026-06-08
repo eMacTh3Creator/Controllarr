@@ -124,6 +124,7 @@ This design separates control traffic from torrent traffic: the API/WebUI can be
 
 Recent release line:
 
+- **v2.1.9:** adds automatic conservative resolver protection for 650+ torrent sessions to prevent VPN/DNS resolver crashes.
 - **v2.1.8:** removes remote-login Keychain prompts by keeping WebUI and *arr credentials in portable app state.
 - **v2.1.7:** signed Sparkle appcast, weekly update checks, an on/off switch, and prompted downloads.
 - **v2.1.6:** consistent typed port inputs across native and WebUI.
