@@ -243,6 +243,27 @@ typedef NS_ENUM(NSInteger, CTRLTorrentState) {
 /// Force a re-announce to all trackers on all torrents.
 - (void)forceReannounceAll;
 
+// MARK: Resolver protection (large-library crash guard)
+
+/// Pure decision function for conservative-resolver mode, exposed for
+/// testing. Implements a hysteresis band: a session enters conservative
+/// mode at the upper torrent-count threshold and only relaxes once the
+/// count falls below a lower exit threshold, so a library hovering near
+/// the boundary does not flap libtorrent settings every poll.
+///
+/// - Parameters:
+///   - count: current number of torrents in the session.
+///   - conservative: whether conservative mode is currently engaged.
+/// - Returns: whether conservative mode should be engaged after this count.
++ (BOOL)shouldConserveResolverForTorrentCount:(NSUInteger)count
+                           alreadyConservative:(BOOL)conservative;
+
+/// The torrent count at or above which conservative mode engages.
++ (NSUInteger)conservativeResolverEnterThreshold;
+
+/// The torrent count below which conservative mode relaxes.
++ (NSUInteger)conservativeResolverExitThreshold;
+
 // MARK: Alerts
 
 /// Drain the libtorrent alert queue, NSLog'ing any error-category messages.

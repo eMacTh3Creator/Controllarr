@@ -48,6 +48,17 @@ public actor ControllarrRuntime {
         self.store = store
         await store.flushMigrationIfNeeded()
 
+        // If a legacy Keychain-backed WebUI password could not be read
+        // silently during migration, it was reset to the default. Surface
+        // that in the in-app log so the operator knows to set a new one
+        // before exposing the WebUI on the LAN.
+        if await store.didResetWebUIPasswordOnMigration {
+            logger.warn(
+                "Security",
+                "Your saved WebUI password could not be migrated and was reset to the default \"adminadmin\". Set a new password in Settings before exposing the WebUI to your network."
+            )
+        }
+
         let snapshot = await store.snapshot()
         let savePathURL = URL(fileURLWithPath: snapshot.settings.defaultSavePath)
         let listenPort  = snapshot.settings.initialListenPort(lastKnownGoodPort: snapshot.lastKnownGoodPort)

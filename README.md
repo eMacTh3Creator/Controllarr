@@ -124,6 +124,7 @@ This design separates control traffic from torrent traffic: the API/WebUI can be
 
 Recent release line:
 
+- **v2.1.10:** resolver-mode hysteresis so large libraries no longer flap protection near the threshold, lower-overhead session stats, and a clear notice when a legacy WebUI password is reset during migration.
 - **v2.1.9:** adds automatic conservative resolver protection for 650+ torrent sessions to prevent VPN/DNS resolver crashes.
 - **v2.1.8:** removes remote-login Keychain prompts by keeping WebUI and *arr credentials in portable app state.
 - **v2.1.7:** signed Sparkle appcast, weekly update checks, an on/off switch, and prompted downloads.
@@ -217,6 +218,18 @@ Controllarr is public and usable, but it is still moving quickly. The safest pro
 - Use VPN binding and the kill switch if torrent traffic must never leak.
 - Use the Network Diagnostics panel when exposing the WebUI to another LAN machine.
 - Watch release notes before upgrading a heavily loaded 700+ torrent node.
+
+### Credential storage
+
+Since v2.1.8, Controllarr keeps the WebUI password and *arr API keys in its
+portable app-state file rather than the macOS Keychain. This is what stops the
+repeated Keychain prompts on ad-hoc public builds, but it also means those
+secrets are stored in clear text inside the Application Support state
+directory. Protect that directory with normal file permissions, and do not
+share your raw state file. When upgrading from an older Keychain-backed build,
+if macOS cannot read your saved WebUI password without prompting, Controllarr
+resets it to the default `adminadmin` and logs a notice — set a new password in
+Settings before exposing the WebUI to your network.
 
 ## License
 

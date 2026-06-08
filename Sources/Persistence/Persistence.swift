@@ -792,8 +792,18 @@ public actor PersistenceStore {
         // Keychain UI. If the old password cannot be read without prompting,
         // reset to the default so the operator can log in and choose a new one.
         if state.settings.webUIPassword == "__keychain__" {
-            state.settings.webUIPassword =
-                Keychain.get(forKey: Keychain.webUIPasswordKey) ?? "adminadmin"
+            if let recovered = Keychain.get(forKey: Keychain.webUIPasswordKey) {
+                state.settings.webUIPassword = recovered
+            } else {
+                // The old password could not be read without prompting, so we
+                // fall back to the default. Surface this loudly: a previously
+                // customized password has silently reverted to "adminadmin"
+                // and the operator should set a new one before exposing the
+                // WebUI on the LAN.
+                state.settings.webUIPassword = "adminadmin"
+                _didResetWebUIPasswordOnMigration = true
+                NSLog("[Controllarr] WARNING: legacy Keychain WebUI password could not be read; reset to default \"adminadmin\". Set a new password in Settings before exposing the WebUI.")
+            }
             _needsFlush = true
         }
         for i in state.settings.arrEndpoints.indices {
@@ -812,6 +822,16 @@ public actor PersistenceStore {
     /// Flag set during init when migration happened. The first call to
     /// any write method will trigger the actual disk write.
     private var _needsFlush: Bool = false
+
+    /// True when the legacy `__keychain__` WebUI password could not be read
+    /// silently during migration and was reset to the default. Lets the
+    /// runtime surface a one-time "your password was reset" notice/log.
+    private var _didResetWebUIPasswordOnMigration: Bool = false
+
+    /// Read-only accessor for the migration password-reset flag.
+    public var didResetWebUIPasswordOnMigration: Bool {
+        _didResetWebUIPasswordOnMigration
+    }
 
     /// Call once after init from an async context to flush any migration
     /// changes that happened during init.

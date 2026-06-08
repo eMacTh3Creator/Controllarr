@@ -6,15 +6,15 @@
     <language>en</language>
     <link>https://emacth3creator.github.io/Controllarr/</link>
     <item>
-      <title>Version 2.1.9</title>
-      <sparkle:version>219</sparkle:version>
-      <sparkle:shortVersionString>2.1.9</sparkle:shortVersionString>
-      <sparkle:releaseNotesLink>https://github.com/eMacTh3Creator/Controllarr/releases/tag/v2.1.9</sparkle:releaseNotesLink>
-      <pubDate>Mon, 08 Jun 2026 13:01:16 GMT</pubDate>
+      <title>Version 2.1.10</title>
+      <sparkle:version>220</sparkle:version>
+      <sparkle:shortVersionString>2.1.10</sparkle:shortVersionString>
+      <sparkle:releaseNotesLink>https://github.com/eMacTh3Creator/Controllarr/releases/tag/v2.1.10</sparkle:releaseNotesLink>
+      <pubDate>Mon, 08 Jun 2026 13:49:54 GMT</pubDate>
       <enclosure
-        url="https://github.com/eMacTh3Creator/Controllarr/releases/download/v2.1.9/Controllarr-v2.1.9-macOS-arm64.zip"
-        sparkle:edSignature="Am1XhSSg8StUFQk+0J+qJEkiF3ng30/+Nu2omt0TVw3AO4kkYbgG7GRY5NrJ2zi/TZ3NIAwqpmfA/6S+auwQAw=="
-        length="11867769"
+        url="https://github.com/eMacTh3Creator/Controllarr/releases/download/v2.1.10/Controllarr-v2.1.10-macOS-arm64.zip"
+        sparkle:edSignature="pkTVLK/QmnEftGqPkjrqxjTv1j0dR8Ib9tJfPWUmVZhoAIRG0kKVSbC6Hs1yKi0BI+klCDu2Bqx4ypiQGtJhBw=="
+        length="11795973"
         type="application/octet-stream" />
     </item>
   </channel>

@@ -171,6 +171,14 @@ static int ctrl_conservative_torrent_threshold() {
     return 650;
 }
 
+static int ctrl_conservative_exit_threshold() {
+    // Hysteresis: once conservative resolver protection engages, keep it on
+    // until the library drops comfortably below the enter threshold. A
+    // ~70-torrent band stops a session hovering near 650 (completions,
+    // removals, re-adds) from flapping settings on every poll tick.
+    return 580;
+}
+
 static int ctrl_background_tracker_limit(BOOL conservative = NO) {
     // Keep tracker hostname resolution deliberately conservative. Crash
     // reports from 700+ torrent libraries point at libtorrent's resolver
@@ -289,7 +297,7 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
         lt::settings_pack pack;
         pack.set_str(lt::settings_pack::listen_interfaces,
                      ctrl_build_listen_interfaces(port, bindAll).UTF8String);
-        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.1.9 libtorrent/2.0");
+        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.1.10 libtorrent/2.0");
         pack.set_int(lt::settings_pack::alert_mask,
                      lt::alert_category::error
                      | lt::alert_category::status
@@ -338,10 +346,32 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
     return self;
 }
 
++ (NSUInteger)conservativeResolverEnterThreshold {
+    return (NSUInteger)ctrl_conservative_torrent_threshold();
+}
+
++ (NSUInteger)conservativeResolverExitThreshold {
+    return (NSUInteger)ctrl_conservative_exit_threshold();
+}
+
++ (BOOL)shouldConserveResolverForTorrentCount:(NSUInteger)count
+                          alreadyConservative:(BOOL)conservative {
+    // Hysteresis band: engage at the enter threshold (650) but don't relax
+    // until the count falls below the lower exit threshold (580). Without
+    // this, a library oscillating around 650 would re-apply a full
+    // settings_pack on every crossing.
+    if (conservative) {
+        return count >= (NSUInteger)ctrl_conservative_exit_threshold();
+    }
+    return count >= (NSUInteger)ctrl_conservative_torrent_threshold();
+}
+
 - (void)applyResolverModeForTorrentCount:(NSUInteger)torrentCount
                                   reason:(NSString *)reason {
     if (!_session) return;
-    BOOL shouldConserve = torrentCount >= (NSUInteger)ctrl_conservative_torrent_threshold();
+    BOOL shouldConserve =
+        [CTRLSession shouldConserveResolverForTorrentCount:torrentCount
+                                       alreadyConservative:_conservativeResolverMode];
     if (shouldConserve == _conservativeResolverMode) return;
 
     _conservativeResolverMode = shouldConserve;
@@ -850,7 +880,10 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
 }
 
 - (CTRLSessionStats *)sessionStats {
-    [self applyResolverModeForTorrentCount:_session->get_torrents().size()
+    // Snapshot the handle vector once: at 700+ torrents a second
+    // get_torrents() copy per stats poll is wasted work.
+    std::vector<lt::torrent_handle> handles = _session->get_torrents();
+    [self applyResolverModeForTorrentCount:handles.size()
                                     reason:@"session stats"];
 
     CTRLSessionStats *s = [CTRLSessionStats new];
@@ -860,7 +893,7 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
     int peerTotal = 0, count = 0;
     BOOL hasIncoming = NO;
 
-    for (auto const &h : _session->get_torrents()) {
+    for (auto const &h : handles) {
         if (!h.is_valid()) continue;
         auto st = h.status();
         totalDown += st.all_time_download;
