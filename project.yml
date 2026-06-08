@@ -17,8 +17,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "2.1.12"
-    CURRENT_PROJECT_VERSION: "222"
+    MARKETING_VERSION: "2.1.13"
+    CURRENT_PROJECT_VERSION: "223"
     ONLY_ACTIVE_ARCH: YES
     ENABLE_HARDENED_RUNTIME: YES
     # Ad-hoc sign by default so the .app runs locally without a

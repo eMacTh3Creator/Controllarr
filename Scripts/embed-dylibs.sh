@@ -69,27 +69,35 @@ for src in "$SRC_LT" "$SRC_SSL" "$SRC_CRYPTO"; do
     install_name_tool -id "@rpath/$name" "$FRAMEWORKS/$name" 2>/dev/null || true
 done
 
-# --- Rewrite the main binary's references from /opt/homebrew/... to @rpath/... ---
-echo "  Rewrite main binary load paths"
-install_name_tool -change "$SRC_LT"     "@rpath/$NAME_LT"     "$MACHO" 2>/dev/null || true
-install_name_tool -change "$SRC_SSL"    "@rpath/$NAME_SSL"    "$MACHO" 2>/dev/null || true
-install_name_tool -change "$SRC_CRYPTO" "@rpath/$NAME_CRYPTO" "$MACHO" 2>/dev/null || true
+# --- Rewrite EVERY /opt/homebrew dependency to @rpath/<basename> ---
+#
+# Read the ACTUAL install names out of each Mach-O with otool rather than
+# assuming hardcoded source paths. Homebrew bakes a mix of layouts —
+# `opt/<formula>/lib/...`, versioned `Cellar/<formula>/<ver>/lib/...` — and
+# the binary's libtorrent reference comes from whatever it linked against, not
+# from the file we copied. Assuming a single "from" path (the old approach)
+# silently no-ops when it doesn't match, which is exactly how 2.1.11/2.1.12
+# shipped with absolute /opt/homebrew paths that crash at launch on machines
+# without Homebrew. Rewriting whatever otool reports is robust to all of it.
+rewrite_brew_refs() {
+    macho="$1"
+    [ -f "$macho" ] || return 0
+    otool -L "$macho" | awk 'NR>1 {print $1}' | while IFS= read -r ref; do
+        case "$ref" in
+            /opt/homebrew/*)
+                base=$(basename "$ref")
+                echo "    $(basename "$macho"): $ref -> @rpath/$base"
+                install_name_tool -change "$ref" "@rpath/$base" "$macho" 2>/dev/null || true
+                ;;
+        esac
+    done
+}
 
-# --- Fix cross-references between embedded dylibs ---
-# libtorrent links to libssl and libcrypto
-LT="$FRAMEWORKS/$NAME_LT"
-if [ -f "$LT" ]; then
-    echo "  Rewrite libtorrent cross-references"
-    install_name_tool -change "$SRC_SSL"    "@rpath/$NAME_SSL"    "$LT" 2>/dev/null || true
-    install_name_tool -change "$SRC_CRYPTO" "@rpath/$NAME_CRYPTO" "$LT" 2>/dev/null || true
-fi
-
-# libssl links to libcrypto
-SSL="$FRAMEWORKS/$NAME_SSL"
-if [ -f "$SSL" ]; then
-    echo "  Rewrite libssl cross-references"
-    install_name_tool -change "$SRC_CRYPTO" "@rpath/$NAME_CRYPTO" "$SSL" 2>/dev/null || true
-fi
+echo "  Rewriting Homebrew references to @rpath"
+rewrite_brew_refs "$MACHO"
+for f in "$FRAMEWORKS"/lib*.dylib; do
+    rewrite_brew_refs "$f"
+done
 
 # Ensure @rpath includes ../Frameworks (xcodebuild usually sets this, but be safe)
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$MACHO" 2>/dev/null || true
@@ -101,11 +109,23 @@ for f in "$FRAMEWORKS"/lib*.dylib; do
 done
 codesign --force --sign - "$MACHO" 2>/dev/null || true
 
-echo "=== Done ==="
-
-# Verify
-echo ""
-echo "Verification — main binary should show @rpath/ paths:"
-if ! otool -L "$MACHO" | grep -E "(torrent|ssl|crypto)"; then
-    echo "WARNING: could not confirm rewritten dylib paths from main binary output"
+# --- Hard self-containment gate ---
+# Fail the build if ANY Mach-O in the bundle still references /opt/homebrew.
+# Without this, a non-self-contained bundle ships and crashes at launch on
+# any machine that lacks the exact Homebrew libraries (see 2.1.11/2.1.12).
+echo "  Verifying self-containment"
+leftover=0
+for f in "$MACHO" "$FRAMEWORKS"/lib*.dylib; do
+    [ -f "$f" ] || continue
+    if otool -L "$f" | awk 'NR>1 {print $1}' | grep -q "^/opt/homebrew"; then
+        echo "ERROR: $(basename "$f") still references /opt/homebrew:"
+        otool -L "$f" | awk 'NR>1 {print $1}' | grep "^/opt/homebrew" | sed 's/^/      /'
+        leftover=1
+    fi
+done
+if [ "$leftover" -ne 0 ]; then
+    echo "ERROR: bundle is NOT self-contained — refusing to produce a launch-crashing app."
+    exit 1
 fi
+
+echo "=== Done — bundle is self-contained (no /opt/homebrew references) ==="

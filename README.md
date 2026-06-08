@@ -124,7 +124,8 @@ This design separates control traffic from torrent traffic: the API/WebUI can be
 
 Recent release line:
 
-- **v2.1.12:** native Home dashboard mirroring the WebUI, a torrents search box with one-click clear-to-neutral, and smoother large-library scrolling.
+- **v2.1.13:** critical fix for a launch crash in 2.1.11/2.1.12 on Macs without Homebrew (library paths are now fully self-contained, enforced by a build gate).
+- **v2.1.12:** native Home dashboard mirroring the WebUI, a torrents search box with one-click clear-to-neutral, and smoother large-library scrolling. *(Crashes at launch without Homebrew — use 2.1.13.)*
 - **v2.1.11:** embeds a defensively hardened libtorrent 2.0.12 (re-entrancy-safe DNS resolver callback handling) for large-library crash resistance.
 - **v2.1.10:** resolver-mode hysteresis so large libraries no longer flap protection near the threshold, lower-overhead session stats, and a clear notice when a legacy WebUI password is reset during migration.
 - **v2.1.9:** adds automatic conservative resolver protection for 650+ torrent sessions to prevent VPN/DNS resolver crashes.
