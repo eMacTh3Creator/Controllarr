@@ -14,11 +14,12 @@ import Persistence
 import Services
 
 enum Tab: String, CaseIterable, Identifiable {
-    case torrents, categories, settings, health, recovery, postProcessor, seeding, arr, log
+    case home, torrents, categories, settings, health, recovery, postProcessor, seeding, arr, log
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .home:          return "Home"
         case .torrents:      return "Torrents"
         case .categories:    return "Categories"
         case .settings:      return "Settings"
@@ -33,6 +34,7 @@ enum Tab: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .home:          return "house"
         case .torrents:      return "arrow.up.arrow.down"
         case .categories:    return "folder"
         case .settings:      return "gearshape"
@@ -46,9 +48,18 @@ enum Tab: String, CaseIterable, Identifiable {
     }
 }
 
+/// WebUI-matching accent palette so the native Home dashboard mirrors the
+/// browser dashboard's color language (see WebUI/src/styles.css :root).
+enum CtrlPalette {
+    static let blue  = Color(red: 0x61/255, green: 0xc7/255, blue: 0xff/255) // #61c7ff
+    static let green = Color(red: 0x87/255, green: 0xd7/255, blue: 0x8f/255) // #87d78f
+    static let amber = Color(red: 0xff/255, green: 0xbe/255, blue: 0x63/255) // #ffbe63
+    static let red   = Color(red: 0xff/255, green: 0x7f/255, blue: 0x77/255) // #ff7f77
+}
+
 struct ContentView: View {
     @State private var vm = RuntimeViewModel.shared
-    @State private var selection: Tab = .torrents
+    @State private var selection: Tab = .home
 
     var body: some View {
         NavigationSplitView {
@@ -78,6 +89,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     switch selection {
+                    case .home:          HomeView(vm: vm, selection: $selection)
                     case .torrents:      TorrentsView(vm: vm)
                     case .categories:    CategoriesView(vm: vm)
                     case .settings:      SettingsView(vm: vm)
@@ -184,6 +196,331 @@ private struct SessionStatusBar: View {
     }
 }
 
+// MARK: - Home dashboard
+
+/// Native dashboard mirroring the browser WebUI's home screen: a hero header
+/// with a live status pill, a grid of session metric cards, a status row
+/// (incoming / VPN / disk / health), quick actions, and the most active
+/// torrents. Reads the same `RuntimeViewModel` snapshot the rest of the app
+/// uses, so it updates on the standard 2s poll.
+struct HomeView: View {
+    let vm: RuntimeViewModel
+    @Binding var selection: Tab
+
+    private var appVersion: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String).map { "v\($0)" } ?? ""
+    }
+
+    private var activeCount: Int {
+        vm.torrents.reduce(into: 0) { count, t in
+            if t.downloadRate > 0 || t.uploadRate > 0 { count += 1 }
+        }
+    }
+
+    private var topActive: [TorrentStats] {
+        vm.torrents
+            .filter { $0.downloadRate > 0 || $0.uploadRate > 0 }
+            .sorted { ($0.downloadRate + $0.uploadRate) > ($1.downloadRate + $1.uploadRate) }
+            .prefix(8)
+            .map { $0 }
+    }
+
+    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 12)]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                hero
+                metrics
+                statusRow
+                quickActions
+                activitySection
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(
+            LinearGradient(
+                colors: [CtrlPalette.blue.opacity(0.06), CtrlPalette.green.opacity(0.04), .clear],
+                startPoint: .topLeading, endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        )
+    }
+
+    // MARK: Hero
+
+    private var hero: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text("Controllarr").font(.largeTitle.bold())
+                    if !appVersion.isEmpty {
+                        Text(appVersion)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.regularMaterial, in: Capsule())
+                    }
+                }
+                Text("Torrent control center for your *arr stack")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 8) {
+                statusPill
+                Button {
+                    Task { await vm.refresh() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+            }
+        }
+    }
+
+    private var statusPill: some View {
+        let incoming = vm.session.hasIncomingConnections
+        return HStack(spacing: 5) {
+            Image(systemName: "circle.fill").font(.system(size: 7))
+            Text(incoming ? "Listening" : "Watching port")
+                .font(.caption.weight(.medium))
+        }
+        .foregroundStyle(incoming ? CtrlPalette.green : CtrlPalette.amber)
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(
+            (incoming ? CtrlPalette.green : CtrlPalette.amber).opacity(0.14),
+            in: Capsule()
+        )
+    }
+
+    // MARK: Metric cards
+
+    private var metrics: some View {
+        LazyVGrid(columns: columns, spacing: 12) {
+            MetricCard(label: "Download", value: formatRate(vm.session.downloadRate), tone: CtrlPalette.blue, icon: "arrow.down")
+            MetricCard(label: "Upload", value: formatRate(vm.session.uploadRate), tone: CtrlPalette.green, icon: "arrow.up")
+            MetricCard(label: "Torrents", value: "\(vm.session.numTorrents)", icon: "square.stack.3d.up")
+            MetricCard(label: "Active", value: "\(activeCount)", tone: CtrlPalette.blue, icon: "bolt")
+            MetricCard(label: "Peers", value: "\(vm.session.numPeersConnected)", icon: "person.2")
+            MetricCard(
+                label: "Listen port",
+                value: "\(vm.session.listenPort)",
+                tone: vm.session.hasIncomingConnections ? CtrlPalette.green : CtrlPalette.amber,
+                icon: "network"
+            )
+            MetricCard(label: "Downloaded", value: formatBytes(vm.session.totalDownloaded), icon: "tray.and.arrow.down")
+            MetricCard(label: "Uploaded", value: formatBytes(vm.session.totalUploaded), icon: "tray.and.arrow.up")
+        }
+    }
+
+    // MARK: Status row
+
+    private var statusRow: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 12)], spacing: 12) {
+            StatusChip(
+                title: "Incoming",
+                value: vm.session.hasIncomingConnections ? "Healthy" : "Waiting",
+                systemImage: vm.session.hasIncomingConnections ? "checkmark.circle.fill" : "clock",
+                tone: vm.session.hasIncomingConnections ? CtrlPalette.green : CtrlPalette.amber
+            )
+            if vm.settings.vpnEnabled, let vpn = vm.vpnStatus {
+                StatusChip(
+                    title: "VPN",
+                    value: vpn.isConnected ? (vpn.interfaceName ?? "Connected") : "Down",
+                    systemImage: vpn.isConnected ? "lock.shield.fill" : "exclamationmark.shield",
+                    tone: vpn.isConnected ? CtrlPalette.green : CtrlPalette.red
+                )
+            }
+            StatusChip(
+                title: "Disk",
+                value: diskValue,
+                systemImage: (vm.diskSpaceStatus?.isPaused ?? false) ? "externaldrive.badge.exclamationmark" : "internaldrive",
+                tone: (vm.diskSpaceStatus?.isPaused ?? false) ? CtrlPalette.amber : CtrlPalette.green
+            )
+            StatusChip(
+                title: "Health",
+                value: vm.healthIssues.isEmpty ? "No issues" : "\(vm.healthIssues.count) issue\(vm.healthIssues.count == 1 ? "" : "s")",
+                systemImage: vm.healthIssues.isEmpty ? "heart.fill" : "heart.slash",
+                tone: vm.healthIssues.isEmpty ? CtrlPalette.green : CtrlPalette.red
+            )
+        }
+    }
+
+    private var diskValue: String {
+        guard let ds = vm.diskSpaceStatus else { return "—" }
+        if ds.isPaused { return "Low · \(formatBytes(ds.freeBytes)) free" }
+        return "\(formatBytes(ds.freeBytes)) free"
+    }
+
+    // MARK: Quick actions
+
+    private var quickActions: some View {
+        HStack(spacing: 10) {
+            Button {
+                selection = .torrents
+            } label: {
+                Label("All Torrents", systemImage: "list.bullet")
+            }
+            Button {
+                vm.openWebUI()
+            } label: {
+                Label("Open Web UI", systemImage: "safari")
+            }
+            if !vm.healthIssues.isEmpty {
+                Button {
+                    selection = .health
+                } label: {
+                    Label("Review Health", systemImage: "heart.text.square")
+                }
+            }
+            Spacer()
+        }
+    }
+
+    // MARK: Activity
+
+    @ViewBuilder
+    private var activitySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Most Active").font(.headline)
+                Spacer()
+                Button("View all") { selection = .torrents }
+                    .buttonStyle(.link).font(.callout)
+            }
+            if topActive.isEmpty {
+                HStack {
+                    Image(systemName: "moon.zzz").foregroundStyle(.secondary)
+                    Text("No active transfers right now.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 18).padding(.horizontal, 14)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(topActive.enumerated()), id: \.element.infoHash) { idx, t in
+                        ActivityRow(torrent: t)
+                        if idx < topActive.count - 1 { Divider().padding(.leading, 14) }
+                    }
+                }
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+    }
+}
+
+private struct MetricCard: View {
+    let label: String
+    let value: String
+    var tone: Color = .primary
+    var icon: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                if let icon {
+                    Image(systemName: icon).font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                Text(label.uppercased())
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(.secondary)
+            }
+            Text(value)
+                .font(.system(.title2, design: .rounded).weight(.semibold))
+                .foregroundStyle(tone)
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06))
+        )
+    }
+}
+
+private struct StatusChip: View {
+    let title: String
+    let value: String
+    let systemImage: String
+    let tone: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .foregroundStyle(tone)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title.uppercased())
+                    .font(.system(size: 10, weight: .semibold)).tracking(0.6)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(tone)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06))
+        )
+    }
+}
+
+private struct ActivityRow: View {
+    let torrent: TorrentStats
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(torrent.name).lineLimit(1).truncationMode(.middle)
+                ProgressBar(value: Double(torrent.progress), tint: torrent.progress >= 1 ? CtrlPalette.green : CtrlPalette.blue)
+                    .frame(height: 5)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 3) {
+                if torrent.downloadRate > 0 {
+                    Text("↓ \(formatRate(torrent.downloadRate))")
+                        .font(.caption.monospacedDigit()).foregroundStyle(CtrlPalette.blue)
+                }
+                if torrent.uploadRate > 0 {
+                    Text("↑ \(formatRate(torrent.uploadRate))")
+                        .font(.caption.monospacedDigit()).foregroundStyle(CtrlPalette.green)
+                }
+            }
+            .frame(width: 90, alignment: .trailing)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+}
+
+/// Lightweight progress bar — a plain capsule fill. Used in dense lists
+/// (Home activity, Torrents table) where SwiftUI's `ProgressView` is
+/// comparatively heavy to lay out per row on every poll.
+struct ProgressBar: View {
+    let value: Double
+    var tint: Color = CtrlPalette.blue
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(0.10))
+                Capsule().fill(tint)
+                    .frame(width: max(0, min(1, value)) * geo.size.width)
+            }
+        }
+    }
+}
+
 // MARK: - Torrents tab
 
 /// Status groupings the operator can dropdown-filter on. Matches the nested
@@ -242,14 +579,16 @@ struct TorrentsView: View {
     /// click / shift-click to select multiple rows for batch operations
     /// (mass pause, mass recheck, mass reannounce, mass delete).
     @State private var selectedHashes: Set<String> = []
-    /// Computed "primary selection" — the single hash to bind the
-    /// detail pane to. If multiple rows are selected the first one in
-    /// the filtered list wins, matching qBittorrent's behavior.
-    private var selectedHash: String? {
+    /// Free-text search over name / category / info-hash. Ephemeral (not
+    /// persisted) so each launch starts with the full list visible.
+    @State private var searchText: String = ""
+    /// Resolve the "primary selection" — the single hash to bind the detail
+    /// pane to — against an already-computed `rows` list so we don't
+    /// re-filter/re-sort the torrent array. If multiple rows are selected the
+    /// first one in the filtered list wins, matching qBittorrent's behavior.
+    private func primaryHash(in rows: [TorrentStats]) -> String? {
         if selectedHashes.count == 1 { return selectedHashes.first }
-        return filteredSortedTorrents
-            .first(where: { selectedHashes.contains($0.infoHash) })?
-            .infoHash
+        return rows.first(where: { selectedHashes.contains($0.infoHash) })?.infoHash
     }
     @State private var dropTargeted = false
     @State private var statusFilter: TorrentStatusFilter = .all
@@ -278,10 +617,39 @@ struct TorrentsView: View {
         }
     }
 
-    private var filteredSortedTorrents: [TorrentStats] {
-        vm.torrents
-            .filter { statusFilter.matches($0) && matchesCategoryFilter($0) }
+    /// Filter + sort the torrent list in a single pass. Called once per body
+    /// evaluation (the result is reused for the table, the detail-pane
+    /// selection, and the counts) instead of being recomputed on every
+    /// property access — which matters on large libraries refreshing every 2s.
+    private func computeRows() -> [TorrentStats] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return vm.torrents
+            .filter { t in
+                guard statusFilter.matches(t), matchesCategoryFilter(t) else { return false }
+                if q.isEmpty { return true }
+                return t.name.lowercased().contains(q)
+                    || (t.category ?? "").lowercased().contains(q)
+                    || t.infoHash.lowercased().contains(q)
+            }
             .sorted(using: sortOrder)
+    }
+
+    /// True when no search text and the default status/category filters are
+    /// active — i.e. the list is showing everything.
+    private var isNeutralState: Bool {
+        searchText.isEmpty && statusFilter == .all && categoryFilter.isEmpty
+    }
+
+    /// Reset search and filters back to a neutral "show everything" state and
+    /// persist the cleared status/category selection.
+    private func clearFilters() {
+        searchText = ""
+        statusFilter = .all
+        categoryFilter = ""
+        var s = vm.settings
+        s.uiPreferences.torrentStatusFilter = TorrentStatusFilter.all.rawValue
+        s.uiPreferences.torrentCategoryFilter = ""
+        Task { await vm.saveSettings(s) }
     }
 
     /// Build the right-click context menu for the given selection of
@@ -442,10 +810,34 @@ struct TorrentsView: View {
     }
 
     var body: some View {
-        VSplitView {
+        // Compute the filtered + sorted rows ONCE per body pass; reused by the
+        // table, the row count, and the detail-pane selection.
+        let rows = computeRows()
+        return VSplitView {
             VStack(spacing: 0) {
                 // Filter toolbar
                 HStack(spacing: 8) {
+                    // Search box
+                    HStack(spacing: 5) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.caption).foregroundStyle(.secondary)
+                        TextField("Search name, category, or hash", text: $searchText)
+                            .textFieldStyle(.plain)
+                        if !searchText.isEmpty {
+                            Button {
+                                searchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Clear search")
+                        }
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    .frame(maxWidth: 280)
+
                     Image(systemName: "line.3.horizontal.decrease.circle")
                         .foregroundStyle(.secondary)
                     Picker("Status", selection: $statusFilter) {
@@ -454,7 +846,7 @@ struct TorrentsView: View {
                         }
                     }
                     .pickerStyle(.menu)
-                    .frame(maxWidth: 180)
+                    .frame(maxWidth: 160)
                     .onChange(of: statusFilter) { _, new in
                         var s = vm.settings
                         s.uiPreferences.torrentStatusFilter = new.rawValue
@@ -472,21 +864,31 @@ struct TorrentsView: View {
                         }
                     }
                     .pickerStyle(.menu)
-                    .frame(maxWidth: 200)
+                    .frame(maxWidth: 180)
                     .onChange(of: categoryFilter) { _, new in
                         var s = vm.settings
                         s.uiPreferences.torrentCategoryFilter = new
                         Task { await vm.saveSettings(s) }
                     }
 
+                    // Reset to a neutral "show everything" state.
+                    if !isNeutralState {
+                        Button {
+                            clearFilters()
+                        } label: {
+                            Label("Clear", systemImage: "xmark.circle")
+                        }
+                        .help("Reset search and filters")
+                    }
+
                     Spacer()
-                    Text("\(filteredSortedTorrents.count) of \(vm.torrents.count)")
+                    Text("\(rows.count) of \(vm.torrents.count)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 2)
 
                 Table(
-                    filteredSortedTorrents,
+                    rows,
                     selection: $selectedHashes,
                     sortOrder: $sortOrder,
                     columnCustomization: $columnCustomization
@@ -499,10 +901,13 @@ struct TorrentsView: View {
                         Text(formatBytes(t.totalWanted)).monospacedDigit()
                     }.width(min: 80, ideal: 90).customizationID("size")
                     TableColumn("Progress", value: \.progress) { t in
-                        VStack(alignment: .leading, spacing: 2) {
-                            ProgressView(value: Double(t.progress))
-                                .progressViewStyle(.linear)
-                                .frame(width: 110)
+                        HStack(spacing: 6) {
+                            ProgressBar(
+                                value: Double(t.progress),
+                                tint: t.paused ? .secondary
+                                    : (t.progress >= 1 ? CtrlPalette.green : CtrlPalette.blue)
+                            )
+                            .frame(width: 80, height: 5)
                             Text(String(format: "%.0f%%", t.progress * 100))
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(.secondary)
@@ -635,7 +1040,7 @@ struct TorrentsView: View {
             .frame(minHeight: 200)
 
             // Detail pane — files / trackers / peers
-            if let hash = selectedHash,
+            if let hash = primaryHash(in: rows),
                vm.torrents.contains(where: { $0.infoHash == hash }) {
                 TorrentDetailPane(vm: vm, hash: hash)
                     .frame(minHeight: 180, idealHeight: 260)
