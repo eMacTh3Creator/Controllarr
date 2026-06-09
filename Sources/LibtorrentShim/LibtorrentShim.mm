@@ -168,15 +168,29 @@ static int ctrl_unqueued_torrent_limit() {
 }
 
 static int ctrl_conservative_torrent_threshold() {
-    return 650;
+    // Engage the gentle large-library network mode well before the resolver
+    // crash counts seen earlier. Lowered from 650 to 250 after a 300+ torrent
+    // node wedged configd (the macOS network-config daemon) after a few hours
+    // of sustained connection/announce churn, panicking the machine.
+    return 250;
 }
 
 static int ctrl_conservative_exit_threshold() {
-    // Hysteresis: once conservative resolver protection engages, keep it on
-    // until the library drops comfortably below the enter threshold. A
-    // ~70-torrent band stops a session hovering near 650 (completions,
-    // removals, re-adds) from flapping settings on every poll tick.
-    return 580;
+    // Hysteresis: once the gentle mode engages, keep it on until the library
+    // drops comfortably below the enter threshold. A ~50-torrent band stops a
+    // session hovering near the threshold (completions, removals, re-adds)
+    // from flapping settings on every poll tick.
+    return 200;
+}
+
+static int ctrl_connection_speed(BOOL conservative = NO) {
+    // New outbound peer connections opened per second. libtorrent defaults to
+    // ~30, which on large libraries produces a sustained storm of new sockets
+    // — each one work for the OS network stack and, behind a VPN, a filtering
+    // decision. Capping the rate slows that churn (peers still accumulate,
+    // just more gently) and is the main lever against the configd-watchdog
+    // reboots on big libraries.
+    return conservative ? 10 : 20;
 }
 
 static int ctrl_background_tracker_limit(BOOL conservative = NO) {
@@ -297,7 +311,7 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
         lt::settings_pack pack;
         pack.set_str(lt::settings_pack::listen_interfaces,
                      ctrl_build_listen_interfaces(port, bindAll).UTF8String);
-        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.1.13 libtorrent/2.0");
+        pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.1.14 libtorrent/2.0");
         pack.set_int(lt::settings_pack::alert_mask,
                      lt::alert_category::error
                      | lt::alert_category::status
@@ -330,6 +344,9 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
         pack.set_int(lt::settings_pack::active_dht_limit, ctrl_background_dht_limit());
         pack.set_int(lt::settings_pack::active_tracker_limit, ctrl_background_tracker_limit());
         pack.set_int(lt::settings_pack::active_lsd_limit, ctrl_background_lsd_limit());
+        // Cap the rate of new outbound connections to keep socket/network
+        // churn gentle (raised further in the gentle large-library mode).
+        pack.set_int(lt::settings_pack::connection_speed, ctrl_connection_speed());
 
         _session = std::make_unique<lt::session>(pack);
         NSLog(
@@ -356,9 +373,9 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
 
 + (BOOL)shouldConserveResolverForTorrentCount:(NSUInteger)count
                           alreadyConservative:(BOOL)conservative {
-    // Hysteresis band: engage at the enter threshold (650) but don't relax
-    // until the count falls below the lower exit threshold (580). Without
-    // this, a library oscillating around 650 would re-apply a full
+    // Hysteresis band: engage at the enter threshold (250) but don't relax
+    // until the count falls below the lower exit threshold (200). Without
+    // this, a library oscillating around the threshold would re-apply a full
     // settings_pack on every crossing.
     if (conservative) {
         return count >= (NSUInteger)ctrl_conservative_exit_threshold();
@@ -393,10 +410,12 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
                  ctrl_resolver_cache_timeout(_conservativeResolverMode));
     pack.set_int(lt::settings_pack::max_concurrent_http_announces,
                  ctrl_http_announce_limit(_conservativeResolverMode));
+    pack.set_int(lt::settings_pack::connection_speed,
+                 ctrl_connection_speed(_conservativeResolverMode));
     _session->apply_settings(std::move(pack));
 
     NSLog(
-        @"[Controllarr] resolver protection %@ at %lu torrents (%@): trackerLimit=%d dhtLimit=%d httpAnnounces=%d minAnnounce=%d resolverCache=%d",
+        @"[Controllarr] resolver protection %@ at %lu torrents (%@): trackerLimit=%d dhtLimit=%d httpAnnounces=%d minAnnounce=%d resolverCache=%d connSpeed=%d",
         _conservativeResolverMode ? @"enabled" : @"relaxed",
         (unsigned long)torrentCount,
         reason ?: @"unknown",
@@ -404,7 +423,8 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
         ctrl_background_dht_limit(_conservativeResolverMode),
         ctrl_http_announce_limit(_conservativeResolverMode),
         ctrl_min_announce_interval(_conservativeResolverMode),
-        ctrl_resolver_cache_timeout(_conservativeResolverMode)
+        ctrl_resolver_cache_timeout(_conservativeResolverMode),
+        ctrl_connection_speed(_conservativeResolverMode)
     );
 }
 

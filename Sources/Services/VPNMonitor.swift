@@ -128,7 +128,9 @@ public actor VPNMonitor {
         }
 
         let prefix = settings.vpnInterfacePrefix.isEmpty ? "utun" : settings.vpnInterfacePrefix
-        let detected = Self.detectVPNInterface(prefix: prefix)
+        // Prefer the interface we're already bound to so detection doesn't
+        // flap between multiple utun devices and rebind the listen socket.
+        let detected = Self.detectVPNInterface(prefix: prefix, preferring: currentInterface?.name)
 
         if let iface = detected {
             // VPN is up.
@@ -212,14 +214,25 @@ public actor VPNMonitor {
 
     // MARK: - VPN interface detection (POSIX getifaddrs)
 
-    /// Scan network interfaces for one matching the given prefix that has
-    /// an assigned IPv4 address. Returns the first match.
-    static func detectVPNInterface(prefix: String) -> DetectedInterface? {
+    /// Scan network interfaces for one matching the given prefix that has an
+    /// assigned IPv4 address.
+    ///
+    /// `preferring` makes detection *sticky*: when an interface with that name
+    /// is still up with a valid IPv4, it is returned even if another matching
+    /// interface sorts earlier. Machines with several VPN clients installed
+    /// have multiple `utun` devices, and naively returning "the first match"
+    /// can oscillate between them across scans — which makes the monitor
+    /// rebind libtorrent's listen socket on every tick (sustained network /
+    /// configd churn). Pinning to the already-bound interface stops the flap.
+    static func detectVPNInterface(prefix: String, preferring: String? = nil) -> DetectedInterface? {
         var ifaddrPtr: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&ifaddrPtr) == 0, let firstAddr = ifaddrPtr else {
             return nil
         }
         defer { freeifaddrs(ifaddrPtr) }
+
+        var firstMatch: DetectedInterface?
+        var preferredMatch: DetectedInterface?
 
         var current: UnsafeMutablePointer<ifaddrs>? = firstAddr
         while let addr = current {
@@ -249,10 +262,15 @@ public actor VPNMonitor {
                     let ip = String(cString: hostname)
                     // Skip link-local and loopback.
                     if ip.hasPrefix("127.") || ip.hasPrefix("169.254.") { continue }
-                    return DetectedInterface(name: name, ip: ip)
+                    let match = DetectedInterface(name: name, ip: ip)
+                    if firstMatch == nil { firstMatch = match }
+                    if let preferring, name == preferring {
+                        preferredMatch = match
+                    }
                 }
             }
         }
-        return nil
+        // Stick with the already-bound interface when it's still valid.
+        return preferredMatch ?? firstMatch
     }
 }
