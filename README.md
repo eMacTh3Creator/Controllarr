@@ -124,6 +124,7 @@ This design separates control traffic from torrent traffic: the API/WebUI can be
 
 Recent release line:
 
+- **v2.1.15:** persistent on-disk log that survives crashes/reboots, plus a "Reveal Log File" button for post-mortem diagnosis.
 - **v2.1.14:** gentler networking for large libraries (capped new-connection rate, large-library mode engages at ~250 torrents, sticky VPN interface) to mitigate configd-watchdog reboots.
 - **v2.1.13:** critical fix for a launch crash in 2.1.11/2.1.12 on Macs without Homebrew (library paths are now fully self-contained, enforced by a build gate).
 - **v2.1.12:** native Home dashboard mirroring the WebUI, a torrents search box with one-click clear-to-neutral, and smoother large-library scrolling. *(Crashes at launch without Homebrew — use 2.1.13.)*

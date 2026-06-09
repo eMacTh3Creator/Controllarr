@@ -488,6 +488,18 @@ final class RuntimeViewModel {
         await refreshAll()
     }
 
+    /// Reveal the persistent log file in Finder so the operator can grab it
+    /// after a crash/reboot without touching the Terminal.
+    func revealLogFile() {
+        guard let path = runtime?.logger.logFilePath else { return }
+        let url = URL(fileURLWithPath: path)
+        if FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([url.deletingLastPathComponent()])
+        }
+    }
+
     func openWebUI() {
         let host = NetworkDiagnostics.localHostForOpen(
             NetworkDiagnostics.normalizedHost(settings.webUIHost)

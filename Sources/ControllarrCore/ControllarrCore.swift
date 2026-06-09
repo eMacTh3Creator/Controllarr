@@ -41,10 +41,18 @@ public actor ControllarrRuntime {
         httpHostOverride: String? = nil,
         httpPortOverride: Int? = nil
     ) async {
-        let logger = Logger()
+        let baseDirectory = storeDirectory ?? PersistenceStore.defaultDirectory()
+        // Persist the runtime log to disk so it survives app crashes and
+        // machine reboots — the record we most want after an unexpected
+        // shutdown. Lives next to the state in Application Support.
+        let logFileURL = baseDirectory
+            .appendingPathComponent("logs", isDirectory: true)
+            .appendingPathComponent("controllarr.log")
+        let logger = Logger(fileURL: logFileURL)
         self.logger = logger
+        logger.info("Runtime", "Controllarr starting — log persisted to \(logFileURL.path)")
 
-        let store = PersistenceStore(directory: storeDirectory ?? PersistenceStore.defaultDirectory())
+        let store = PersistenceStore(directory: baseDirectory)
         self.store = store
         await store.flushMigrationIfNeeded()
 

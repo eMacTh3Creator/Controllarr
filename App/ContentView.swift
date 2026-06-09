@@ -2485,6 +2485,12 @@ struct LogView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 240)
                 Spacer()
+                Button {
+                    vm.revealLogFile()
+                } label: {
+                    Label("Reveal Log File", systemImage: "folder")
+                }
+                .help("Open the on-disk log in Finder. This file persists across crashes and reboots.")
             }
             .padding(8)
             Divider()

@@ -48,9 +48,28 @@ public actor Logger {
     private let capacity: Int
     private var buffer: [Entry] = []
 
-    public init(capacity: Int = 500) {
+    // Persistent log file. The in-memory ring buffer is lost when the app (or
+    // the whole machine) goes down, which is exactly when we most want the
+    // record. Mirroring entries to disk — and fsync'ing frequently — keeps a
+    // post-mortem trail that survives crashes and reboots.
+    private let fileURL: URL?
+    private var fileHandle: FileHandle?
+    private var bytesWritten: Int = 0
+    private var linesSinceSync: Int = 0
+    private let maxFileBytes = 5 * 1024 * 1024   // rotate at ~5 MB, keep one old file
+    private let lineFormatter: ISO8601DateFormatter
+
+    public init(capacity: Int = 500, fileURL: URL? = nil) {
         self.capacity = capacity
+        self.fileURL = fileURL
+        let df = ISO8601DateFormatter()
+        df.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        self.lineFormatter = df
     }
+
+    /// Absolute path of the on-disk log, if persistence is enabled. Exposed so
+    /// the UI can offer a "Reveal in Finder" affordance.
+    nonisolated public var logFilePath: String? { fileURL?.path }
 
     nonisolated public func debug(_ source: String, _ message: String) {
         append(level: .debug, source: source, message: message)
@@ -76,6 +95,61 @@ public actor Logger {
         if buffer.count > capacity {
             buffer.removeFirst(buffer.count - capacity)
         }
+        writeToFile(entry)
+    }
+
+    // MARK: - Persistent file
+
+    private func openFileIfNeeded() {
+        guard fileHandle == nil, let fileURL else { return }
+        let fm = FileManager.default
+        try? fm.createDirectory(at: fileURL.deletingLastPathComponent(),
+                                withIntermediateDirectories: true)
+        if !fm.fileExists(atPath: fileURL.path) {
+            fm.createFile(atPath: fileURL.path, contents: nil)
+        }
+        fileHandle = try? FileHandle(forWritingTo: fileURL)
+        if let h = fileHandle {
+            bytesWritten = Int((try? h.seekToEnd()) ?? 0)
+        }
+    }
+
+    private func writeToFile(_ entry: Entry) {
+        guard fileURL != nil else { return }
+        openFileIfNeeded()
+        guard let h = fileHandle else { return }
+        let line = "\(lineFormatter.string(from: entry.timestamp)) [\(entry.level.rawValue.uppercased())] [\(entry.source)] \(entry.message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        do {
+            try h.write(contentsOf: data)
+            bytesWritten += data.count
+            linesSinceSync += 1
+            // Flush to disk on every warning/error and otherwise every few
+            // lines, so a kernel panic / power loss drops as little as possible.
+            if entry.level >= .warn || linesSinceSync >= 5 {
+                try? h.synchronize()
+                linesSinceSync = 0
+            }
+            if bytesWritten >= maxFileBytes {
+                rotate()
+            }
+        } catch {
+            try? h.close()
+            fileHandle = nil
+        }
+    }
+
+    private func rotate() {
+        guard let fileURL else { return }
+        try? fileHandle?.synchronize()
+        try? fileHandle?.close()
+        fileHandle = nil
+        let backup = URL(fileURLWithPath: fileURL.path + ".1")
+        let fm = FileManager.default
+        try? fm.removeItem(at: backup)
+        try? fm.moveItem(at: fileURL, to: backup)
+        bytesWritten = 0
+        openFileIfNeeded()
     }
 
     public func snapshot(limit: Int = 500) -> [Entry] {
