@@ -48,8 +48,36 @@ certificate/private key, matching App Store Connect provisioning profile, and
 an App Store Connect app record. `iOS/ExportOptions-AppStore.plist` contains the
 publisher's public team/profile names, not secrets.
 
-Archive with manual distribution signing, verify `get-task-allow` is false, and
-upload through Xcode/App Store Connect. An archive or signed IPA is not itself
+Use an App Store Connect-supported release or release-candidate Xcode/SDK. A
+beta macOS host does not require using a beta Xcode; install release Xcode
+alongside it and select that toolchain with `DEVELOPER_DIR` for the entire archive
+and export process. Do not change SDK metadata to disguise an unsupported build.
+Check Apple's [current releases](https://developer.apple.com/news/releases/).
+
+The icon generator has a separate iOS mode which produces a full-bleed 1024px
+RGB image without an alpha channel. Do not copy the transparent macOS icon:
+
+```sh
+swift Scripts/make-icon.swift iOS/Sources/Assets.xcassets/AppIcon.appiconset/icon.png --ios
+```
+
+Generate the iOS project after changing `iOS/project.yml`. Retain all four iPad
+orientations and the launch-screen declaration for multitasking support. Archive
+with manual distribution signing, verify `get-task-allow` is false, and run the
+bundle checks before exporting:
+
+```sh
+swift iOS/Scripts/check-release.swift /path/to/ControllarrRemote.xcarchive/Products/Applications/ControllarrRemote.app
+codesign --verify --deep --strict /path/to/ControllarrRemote.xcarchive/Products/Applications/ControllarrRemote.app
+```
+
+Upload through Xcode/App Store Connect. If Xcode's account/provider lookup fails,
+export an App Store Connect-signed IPA with export option `destination=export`
+and deliver that exact file with Apple's Transporter app. Do not revoke valid
+certificates to work around an account lookup error. Transporter validation and
+App Store Connect build processing must both succeed.
+
+An archive or signed IPA is not itself
 a public iPhone installation method. Only advertise a TestFlight link after
 Apple accepts/processes the build and the beta group is actually available.
 Public testing may require beta review. Physical-device and notification-delivery

@@ -9,7 +9,7 @@
 // seed green) — meant to echo the `arrow.up.arrow.down.circle` glyph
 // used in the menu bar, but bolder and more recognisable at icon sizes.
 //
-// Usage: swift Scripts/make-icon.swift <output.png>
+// Usage: swift Scripts/make-icon.swift <output.png> [--ios]
 //
 
 import AppKit
@@ -18,10 +18,11 @@ import Foundation
 
 let args = CommandLine.arguments
 guard args.count >= 2 else {
-    FileHandle.standardError.write("usage: make-icon.swift <output.png>\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: make-icon.swift <output.png> [--ios]\n".data(using: .utf8)!)
     exit(1)
 }
 let outputPath = args[1]
+let isiOS = args.dropFirst(2).contains("--ios")
 
 let size = CGSize(width: 1024, height: 1024)
 let colorSpace = CGColorSpaceCreateDeviceRGB()
@@ -33,7 +34,7 @@ guard let ctx = CGContext(
     bitsPerComponent: 8,
     bytesPerRow: 0,
     space: colorSpace,
-    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    bitmapInfo: (isiOS ? CGImageAlphaInfo.noneSkipLast : .premultipliedLast).rawValue
 ) else {
     FileHandle.standardError.write("failed to create bitmap context\n".data(using: .utf8)!)
     exit(1)
@@ -41,14 +42,15 @@ guard let ctx = CGContext(
 
 // MARK: Squircle background with gradient
 
-let padding: CGFloat = 40
+// iOS supplies the icon mask; its source must be full-bleed and have no alpha.
+let padding: CGFloat = isiOS ? 0 : 40
 let rect = CGRect(
     x: padding,
     y: padding,
     width: size.width - padding * 2,
     height: size.height - padding * 2
 )
-let cornerRadius: CGFloat = 224 // close to macOS Big Sur+ icon shape
+let cornerRadius: CGFloat = isiOS ? 0 : 224
 
 let squircle = CGPath(
     roundedRect: rect,
@@ -101,12 +103,14 @@ ctx.drawRadialGradient(
 ctx.restoreGState()
 
 // Inner stroke for a crisper edge
-ctx.saveGState()
-ctx.addPath(squircle)
-ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.08))
-ctx.setLineWidth(4)
-ctx.strokePath()
-ctx.restoreGState()
+if !isiOS {
+    ctx.saveGState()
+    ctx.addPath(squircle)
+    ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.08))
+    ctx.setLineWidth(4)
+    ctx.strokePath()
+    ctx.restoreGState()
+}
 
 // MARK: Arrows
 

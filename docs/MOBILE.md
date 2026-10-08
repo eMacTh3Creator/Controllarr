@@ -58,7 +58,8 @@ requiring APNs integration, device-token registration and a secure push provider
 ## Distribution
 
 Source and a simulator app are published as developer previews. A simulator ZIP
-cannot be installed on a physical iPhone. TestFlight/App Store distribution needs
-Apple upload/processing and beta availability. A valid distribution-signed archive,
-provisioning profile and App Store Connect record are prepared, but this is not
-yet a public TestFlight release. See [iOS build guide](../iOS/README.md).
+cannot be installed on a physical iPhone. Device build 1.0.0 (2) was delivered
+through Apple Transporter on October 8, 2026 using release Xcode, valid Apple
+Distribution signing and the matching provisioning profile. Apple processing
+and testing-group availability are pending; this is not yet a public TestFlight
+release. See [iOS build guide](../iOS/README.md).
