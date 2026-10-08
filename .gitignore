@@ -34,6 +34,8 @@ WebUI/dist/
 Controllarr.xcodeproj/
 Controllarr?.xcodeproj/
 Controllarr ?.xcodeproj/
+iOS/*.xcodeproj/
+iOS/Info.plist
 
 # Controllarr runtime state (created at run time, not checked in)
 .controllarr/

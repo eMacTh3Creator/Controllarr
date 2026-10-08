@@ -77,6 +77,10 @@ public actor ControllarrRuntime {
             listenPort: listenPort,
             resolver: { category in
                 await store.savePath(forCategory: category)
+            },
+            folderPolicy: { name in
+                guard let name else { return true }
+                return await store.category(named: name)?.createTorrentSubfolder ?? true
             }
         )
         self.engine = engine
@@ -150,6 +154,7 @@ public actor ControllarrRuntime {
 
     public func start() async throws {
         await applyNetworkSettings()
+        await vpnMonitor.forceEvaluate()
         await portWatcher.start()
         await bandwidthScheduler.start()
         await diskSpaceMonitor.start()
@@ -185,8 +190,10 @@ public actor ControllarrRuntime {
 
     public func shutdown() async {
         logger.info("runtime", "Controllarr runtime shutting down")
-        tickTask?.cancel()
+        let finishingTick = tickTask
+        finishingTick?.cancel()
         tickTask = nil
+        await finishingTick?.value
         await portWatcher.stop()
         await bandwidthScheduler.stop()
         await diskSpaceMonitor.stop()
@@ -218,6 +225,7 @@ public actor ControllarrRuntime {
             var tickCount: UInt = 0
             let resumeSaveEveryNTicks: UInt = 15 // ~30s at a 2s cadence.
             while !Task.isCancelled {
+                await engine.drainAlerts()
                 await engine.applyPendingFileFilters()
                 let torrents = await engine.pollStats()
                 async let postTick: Void = postProcessor.tick(torrents: torrents)

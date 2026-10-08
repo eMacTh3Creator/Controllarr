@@ -1,5 +1,36 @@
 # Performance Guide
 
+## v2.3.0 Safety and Scaling Update
+
+Bulk libtorrent status retrieval excludes piece-bitfield copies and reuses the
+shared snapshot. Native UI skips identical torrent/session publications. Resume
+checkpoint requests are bounded to 16 in flight and drained on normal ticks;
+shutdown waits at most five seconds for checkpoint work before freeing the
+session. Folder metadata writes coalesce during mass intake. Bulk removal pauses
+the full selection before removal and yields periodically, rather than refreshing
+the entire UI after each torrent.
+
+Archive extraction admits at most two workers and drains stderr while the child
+runs, retaining only 4 KiB of diagnostics. It considers only the torrent's own
+selected files. Storage moves reject existing-file replacement. A completed move
+does not extract when its category has extraction disabled.
+
+The session starts network-paused until VPN settings have been evaluated. Binding
+is applied before resume and retained on a protected disconnect. This avoids new
+intake/force-start bypassing a per-torrent pause list; it is not a substitute for
+a provider firewall or proof of zero leaks under every VPN transition.
+
+The release regression fixture exercised 1,000 paused local torrents with real
+libtorrent, not mocks, in about 0.65 seconds total for intake/snapshot/checkpoint/
+bulk removal/shutdown on this host. It did not measure sustained active WAN
+traffic, long-term memory growth or reproduce a whole-system reboot. Do not infer
+that the prior restart cause is fixed without panic/watchdog reports. Keep the
+persistent log and collect system diagnostics if it recurs.
+
+Remote clients request at most 500 rows per page (iOS uses 100), with 512 retained
+events. Server filtering still scans/sorts the cached library; pages bound the
+response/UI size, not server-side search complexity.
+
 This document covers the v1.3 performance and scaling work that landed for Controllarr.
 
 ## Goals

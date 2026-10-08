@@ -1,5 +1,26 @@
 # Operations Guide
 
+## Current Release: v2.3.0
+
+See [mobile setup](MOBILE.md), [Remote Protocol 1](REMOTE_API.md), [performance
+and reliability limits](PERFORMANCE.md), and [platform coverage](PARITY.md).
+Existing categories retain their old folder policy; new ones default to per-
+torrent folders. `contentLayout=Subfolder` can override intake policy per add.
+Do not add trailing slashes as a workaround. Use confirmed **Repair import
+folder layout** for old flat torrents, not manual filesystem moves.
+
+For isolated native-app testing, `CONTROLLARR_STATE_DIR=/absolute/test/profile`
+and `CONTROLLARR_HTTP_PORT=18795` override the profile/listener without touching
+production state. Daemon equivalents remain `--state-dir` and `--port`.
+These are test/deployment options, not a migration of downloaded payloads.
+
+Release packaging must use libraries targeting macOS 15 or earlier. If local
+Homebrew OpenSSL targets a newer OS, fetch an `arm64_sequoia` OpenSSL bottle,
+extract its libraries/license into an ignored vendor directory and set
+`CONTROLLARR_OPENSSL_ROOT` to that formula prefix. The embed script checks
+minimum OS and rejects unresolved Homebrew/bottle placeholder paths. Do not
+lower a dylib's minimum OS with binary patching.
+
 This doc covers the first operator-focused v1.5 foundations that now exist on `main`.
 
 ## Performance and Scale
@@ -89,13 +110,18 @@ newer release is available; it does not silently install updates.
 The public Sparkle key is embedded in the app bundle. The private signing key is
 stored in the release maintainer's macOS Keychain under
 `com.controllarr.updates` and is not committed to the repository.
-Local release signing may trigger a one-time Keychain prompt for Sparkle's
-`sign_update` tool. Installed Controllarr apps do not use the private key and
+Release tooling refuses implicit Keychain access. A maintainer may explicitly
+use `Scripts/update-appcast.py --allow-keychain ...` to permit a publisher-only
+prompt for Sparkle's `sign_update` tool. Installed Controllarr apps do not use the private key and
 will not prompt users for Keychain access during weekly update checks.
 
 For CI-based releases, set `SPARKLE_PRIVATE_KEY` as a secret and run
 `Scripts/update-appcast.py`; the script will sign from standard input instead
 of using the local Keychain.
+
+The v2.3.0 feed signature was checked independently against the embedded public
+key and exact release ZIP. If the publisher key becomes unavailable, preserve
+the previous valid feed. Never replace that key or publish an unsigned feed as a workaround.
 
 Users on builds older than v2.1.7 may need to install v2.1.7 manually once
 before weekly prompted updates are fully trusted.
@@ -109,7 +135,7 @@ The WebUI Settings tab now includes a **Backup & restore** panel.
 - Use **Export backup** to download the current Controllarr state as JSON.
 - Turn on **Include saved secrets in exports** if you want the backup to carry the WebUI password and saved *arr API keys.
 - A redacted export is still useful for categories, save-path routing, seeding policy, health settings, and other non-secret state.
-- Public ad-hoc builds intentionally keep WebUI and *arr credentials in Controllarr state instead of reading them from Keychain during login. This prevents remote WebUI/API access from triggering macOS Keychain prompts on the torrent Mac.
+- Desktop builds intentionally keep WebUI and *arr credentials in Controllarr state instead of reading them from Keychain during login. This prevents remote WebUI/API access from triggering macOS Keychain prompts on the torrent Mac. The v2.3.0 Mac release is Developer ID signed and notarized; this does not change the credential-storage policy.
 
 ### Import
 

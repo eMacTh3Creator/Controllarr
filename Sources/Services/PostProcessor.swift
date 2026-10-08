@@ -69,6 +69,7 @@ public actor PostProcessor {
     private let store: PersistenceStore
     private let logger: Logger
     private var records: [String: Record] = [:]
+    private var activeExtractions: Set<String> = []
 
     public init(engine: TorrentEngine, store: PersistenceStore, logger: Logger) {
         self.engine = engine
@@ -111,6 +112,8 @@ public actor PostProcessor {
     /// Advance the state machine for every torrent the engine currently
     /// knows about. Called on the runtime's stats tick.
     public func tick(torrents: [TorrentStats]) async {
+        let live = Set(torrents.map(\.infoHash))
+        records = records.filter { live.contains($0.key) || activeExtractions.contains($0.key) }
         for torrent in torrents {
             await advance(torrent: torrent)
         }
@@ -118,9 +121,9 @@ public actor PostProcessor {
 
     private func advance(torrent: TorrentStats) async {
         let hash = torrent.infoHash
-        let isComplete = torrent.progress >= 0.999
+        let isComplete = torrent.hasMetadata && (torrent.progress >= 1
             || torrent.state == .finished
-            || torrent.state == .seeding
+            || torrent.state == .seeding)
 
         // Already tracking something for this hash?
         if var existing = records[hash] {
@@ -131,7 +134,16 @@ public actor PostProcessor {
                 await decideNextStep(torrent: torrent, record: &existing)
                 records[hash] = existing
             case .movingStorage(let target, let startedAt):
-                if torrent.savePath == target {
+                if URL(fileURLWithPath: torrent.savePath).standardizedFileURL.path == URL(fileURLWithPath: target).standardizedFileURL.path {
+                    let category = await store.categories().first { $0.name == existing.category }
+                    if category?.extractArchives != true {
+                        existing.stage = .done
+                        existing.message = "storage move complete"
+                        existing.lastUpdated = Date()
+                        records[hash] = existing
+                        return
+                    }
+                    guard activeExtractions.count < 2 else { return }
                     existing.stage = .extracting
                     existing.lastUpdated = Date()
                     records[hash] = existing
@@ -191,12 +203,17 @@ public actor PostProcessor {
         }
 
         // Step 1: move storage if completePath is set and we're not already there.
-        if let target = cat.completePath, !target.isEmpty, torrent.savePath != target {
+        if let root = cat.completePath, !root.isEmpty,
+           case let target = await engine.destinationPath(for: torrent.infoHash, root: root),
+           URL(fileURLWithPath: torrent.savePath).standardizedFileURL.path != target {
             try? FileManager.default.createDirectory(
                 atPath: target,
                 withIntermediateDirectories: true
             )
-            _ = await engine.move(infoHash: torrent.infoHash, to: URL(fileURLWithPath: target))
+            guard await engine.move(infoHash: torrent.infoHash, to: URL(fileURLWithPath: target)) else {
+                record.stage = .failed(reason: "storage move rejected")
+                return
+            }
             record.stage = .movingStorage(targetPath: target, startedAt: Date())
             record.message = "moving to \(target)"
             record.lastUpdated = Date()
@@ -206,6 +223,7 @@ public actor PostProcessor {
 
         // Step 2: extract archives if requested.
         if cat.extractArchives {
+            guard activeExtractions.count < 2 else { return }
             record.stage = .extracting
             record.message = "scanning for archives"
             record.lastUpdated = Date()
@@ -225,11 +243,21 @@ public actor PostProcessor {
         let name = record.name
         let logger = self.logger
         let root = URL(fileURLWithPath: directory)
+        activeExtractions.insert(hash)
+        let files = await engine.fileInfo(for: hash) ?? []
+        let archives = files.filter { $0.priority > 0 }.map { root.appendingPathComponent($0.name).standardizedFileURL }
+            .filter { url in
+                guard url.path.hasPrefix(root.standardizedFileURL.path + "/"), ["rar", "zip", "7z"].contains(url.pathExtension.lowercased()) else { return false }
+                let stem = url.deletingPathExtension().lastPathComponent.lowercased()
+                if let range = stem.range(of: #"\.part\d+$"#, options: .regularExpression) {
+                    return Int(stem[range].dropFirst(5)) == 1
+                }
+                return true
+            }
 
         // Snapshot the directory tree once and fan out extractions from
         // a detached task so the actor isn't pinned.
         Task.detached(priority: .utility) { [weak self] in
-            let archives = Self.findArchives(under: root)
             if archives.isEmpty {
                 await self?.markExtractionDone(hash: hash, message: "no archives found")
                 logger.info("post-processor", "\(name): no archives")
@@ -263,6 +291,7 @@ public actor PostProcessor {
     }
 
     private func markExtractionDone(hash: String, message: String) {
+        activeExtractions.remove(hash)
         guard var r = records[hash] else { return }
         r.stage = .done
         r.message = message
@@ -271,6 +300,7 @@ public actor PostProcessor {
     }
 
     private func markExtractionFailed(hash: String, reason: String) {
+        activeExtractions.remove(hash)
         guard var r = records[hash] else { return }
         r.stage = .failed(reason: reason)
         r.message = reason
@@ -328,17 +358,24 @@ public actor PostProcessor {
         ]
         let errPipe = Pipe()
         proc.standardError = errPipe
-        proc.standardOutput = Pipe()
+        proc.standardOutput = FileHandle.nullDevice
         do {
             try proc.run()
         } catch {
             return (false, "launch failed: \(error.localizedDescription)")
         }
+        // Drain while the child runs so a full stderr pipe cannot deadlock
+        // extraction. Keep only a small diagnostic prefix in memory.
+        var errData = Data()
+        while true {
+            let chunk = errPipe.fileHandleForReading.readData(ofLength: 4096)
+            if chunk.isEmpty { break }
+            if errData.count < 4096 { errData.append(chunk.prefix(4096 - errData.count)) }
+        }
         proc.waitUntilExit()
         if proc.terminationStatus == 0 {
             return (true, "ok")
         }
-        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
         let errMsg = String(data: errData, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? "exit \(proc.terminationStatus)"
         return (false, errMsg)

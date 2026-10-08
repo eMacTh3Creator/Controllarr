@@ -64,6 +64,10 @@ public actor VPNMonitor {
     private var killSwitchEngaged: Bool = false
     private var currentInterface: DetectedInterface?
     private var isBound: Bool = false
+    private var enabled: Bool = false
+    private var hasEvaluated = false
+    private var evaluating = false
+    private var reevaluateRequested = false
 
     public init(engine: TorrentEngine, store: PersistenceStore, logger: Logger) {
         self.engine = engine
@@ -91,7 +95,7 @@ public actor VPNMonitor {
 
     public func snapshot() -> Status {
         Status(
-            enabled: true, // caller should check settings; snapshot just reports state
+            enabled: enabled,
             isConnected: currentInterface != nil,
             interfaceName: currentInterface?.name,
             interfaceIP: currentInterface?.ip,
@@ -109,7 +113,20 @@ public actor VPNMonitor {
     // MARK: - Core evaluation loop
 
     private func evaluate() async {
+        guard !evaluating else { reevaluateRequested = true; return }
+        evaluating = true
+        defer {
+            evaluating = false
+            if reevaluateRequested {
+                reevaluateRequested = false
+                Task { await self.evaluate() }
+            }
+        }
         let settings = await store.settings()
+        let firstEvaluation = !hasEvaluated
+        let wasEnabled = enabled
+        hasEvaluated = true
+        enabled = settings.vpnEnabled
 
         // Feature disabled — make sure we're unbound and kill switch disarmed.
         guard settings.vpnEnabled else {
@@ -118,12 +135,13 @@ public actor VPNMonitor {
                 killSwitchEngaged = false
                 logger.info("vpn", "VPN protection disabled — resumed kill-switched torrents")
             }
-            if isBound {
+            if isBound || firstEvaluation || wasEnabled {
                 await unbindFromVPN()
                 isBound = false
                 logger.info("vpn", "VPN protection disabled — unbound from VPN interface")
             }
             currentInterface = nil
+            await engine.setNetworkPaused(false)
             return
         }
 
@@ -137,6 +155,17 @@ public actor VPNMonitor {
             let changed = (iface.name != currentInterface?.name || iface.ip != currentInterface?.ip)
             currentInterface = iface
 
+            // Bind before resuming; new adds and Force Resume are also gated
+            // by the session pause while the protected adapter is missing.
+            if settings.vpnBindInterface && (!isBound || changed) {
+                await bindToVPN(iface: iface)
+                isBound = true
+                logger.info("vpn", "Bound to VPN interface \(iface.name) (\(iface.ip))")
+            } else if !settings.vpnBindInterface && (isBound || firstEvaluation) {
+                await unbindFromVPN()
+                isBound = false
+            }
+            await engine.setNetworkPaused(false)
             // If kill switch was engaged, resume.
             if killSwitchEngaged {
                 await resumeKillSwitched()
@@ -145,15 +174,14 @@ public actor VPNMonitor {
                 pausedByUs.removeAll()
             }
 
-            // Bind to VPN interface if enabled and (first time or interface changed).
-            if settings.vpnBindInterface && (!isBound || changed) {
-                await bindToVPN(iface: iface)
-                isBound = true
-                logger.info("vpn", "Bound to VPN interface \(iface.name) (\(iface.ip))")
-            }
         } else {
             // VPN is down.
             currentInterface = nil
+            await engine.setNetworkPaused(settings.vpnKillSwitch || settings.vpnBindInterface)
+            if !settings.vpnBindInterface && (isBound || firstEvaluation) {
+                await unbindFromVPN()
+                isBound = false
+            }
 
             // Engage kill switch if enabled.
             if settings.vpnKillSwitch && !killSwitchEngaged {
@@ -161,18 +189,16 @@ public actor VPNMonitor {
                 killSwitchEngaged = true
             }
 
-            // Unbind from VPN so libtorrent doesn't try to use a dead interface.
+            // Never fall back to the default route when protection is on.
             if isBound {
-                await unbindFromVPN()
-                isBound = false
-                logger.warn("vpn", "VPN down — unbound from interface")
+                logger.warn("vpn", "VPN down; session paused, protected binding retained")
             }
         }
     }
 
     private func currentInterval() async -> Int {
         let settings = await store.settings()
-        return max(1, settings.vpnMonitorIntervalSeconds)
+        return max(1, min(3600, settings.vpnMonitorIntervalSeconds))
     }
 
     // MARK: - Kill switch

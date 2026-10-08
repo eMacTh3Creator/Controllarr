@@ -27,6 +27,8 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
+#include <deque>
 #include <fstream>
 #include <sstream>
 
@@ -36,6 +38,9 @@
 @property (nonatomic, readwrite, copy) NSString *name;
 @property (nonatomic, readwrite, copy) NSString *infoHash;
 @property (nonatomic, readwrite, copy) NSString *savePath;
+@property (nonatomic, readwrite, copy) NSString *contentPath;
+@property (nonatomic, readwrite, copy) NSString *errorMessage;
+@property (nonatomic, readwrite) BOOL hasMetadata;
 @property (nonatomic, readwrite)       float     progress;
 @property (nonatomic, readwrite)       CTRLTorrentState state;
 @property (nonatomic, readwrite)       BOOL      paused;
@@ -254,6 +259,12 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
     // Cheap cache so statsForInfoHash: and moveTorrent: don't have to
     // rescan get_torrents() every call.
     std::unordered_map<std::string, lt::torrent_handle> _handlesByHash;
+    std::deque<lt::torrent_handle> _resumeQueue;
+    std::unordered_set<std::string> _resumePending;
+    NSString *_resumeDirectory;
+    NSString *_outgoingInterface;
+    int _perTorrentConnections;
+    int _perTorrentUploads;
 }
 
 // MARK: Add-time sidecar helpers
@@ -310,7 +321,7 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
 
         lt::settings_pack pack;
         pack.set_str(lt::settings_pack::listen_interfaces,
-                     ctrl_build_listen_interfaces(port, bindAll).UTF8String);
+                     "");
         pack.set_str(lt::settings_pack::user_agent, "Controllarr/2.1.15 libtorrent/2.0");
         pack.set_int(lt::settings_pack::alert_mask,
                      lt::alert_category::error
@@ -328,9 +339,9 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
         pack.set_int(lt::settings_pack::max_concurrent_http_announces, ctrl_http_announce_limit());
         // Respect NAT-PMP / UPnP so the port watcher has something to
         // cross-check against.
-        pack.set_bool(lt::settings_pack::enable_upnp, true);
-        pack.set_bool(lt::settings_pack::enable_natpmp, true);
-        pack.set_bool(lt::settings_pack::enable_dht, true);
+        pack.set_bool(lt::settings_pack::enable_upnp, false);
+        pack.set_bool(lt::settings_pack::enable_natpmp, false);
+        pack.set_bool(lt::settings_pack::enable_dht, false);
         pack.set_bool(lt::settings_pack::enable_lsd, false); // too noisy on mac
 
         // Default to queueing OFF, while still capping background announce
@@ -348,7 +359,8 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
         // churn gentle (raised further in the gentle large-library mode).
         pack.set_int(lt::settings_pack::connection_speed, ctrl_connection_speed());
 
-        _session = std::make_unique<lt::session>(pack);
+        // Restore and configure the VPN policy before opening peer traffic.
+        _session = std::make_unique<lt::session>(lt::session_params(pack), lt::session::paused);
         NSLog(
             @"[Controllarr] session up: port=%u save=%@ aio_threads=%d hashing_threads=%d tracker_limit=%d dht_limit=%d checking_limit=%d",
             port,
@@ -433,6 +445,10 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
 - (BOOL)addMagnet:(NSString *)magnetURI
          savePath:(NSString *)savePath
             error:(NSError **)error {
+    if (!_session) {
+        if (error) *error = [NSError errorWithDomain:@"Controllarr" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Torrent engine is shut down"}];
+        return NO;
+    }
     lt::error_code ec;
     lt::add_torrent_params atp = lt::parse_magnet_uri(magnetURI.UTF8String, ec);
     if (ec) {
@@ -441,6 +457,8 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
     }
     NSString *effectiveSavePath = savePath.length ? savePath : _savePath;
     atp.save_path = effectiveSavePath.UTF8String;
+    if (_perTorrentConnections > 0) atp.max_connections = _perTorrentConnections;
+    if (_perTorrentUploads > 0) atp.max_uploads = _perTorrentUploads;
     lt::torrent_handle h = _session->add_torrent(std::move(atp), ec);
     if (ec || !h.is_valid()) {
         if (error) *error = ctrl_error_from_ec(ec);
@@ -461,10 +479,16 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
 - (BOOL)addTorrentFile:(NSString *)path
               savePath:(NSString *)savePath
                  error:(NSError **)error {
+    if (!_session) {
+        if (error) *error = [NSError errorWithDomain:@"Controllarr" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Torrent engine is shut down"}];
+        return NO;
+    }
     try {
         lt::add_torrent_params atp = lt::load_torrent_file(path.UTF8String);
         NSString *effectiveSavePath = savePath.length ? savePath : _savePath;
         atp.save_path = effectiveSavePath.UTF8String;
+        if (_perTorrentConnections > 0) atp.max_connections = _perTorrentConnections;
+        if (_perTorrentUploads > 0) atp.max_uploads = _perTorrentUploads;
         lt::error_code ec;
         lt::torrent_handle h = _session->add_torrent(std::move(atp), ec);
         if (ec || !h.is_valid()) {
@@ -494,6 +518,7 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
 // MARK: Mutating
 
 - (lt::torrent_handle)handleFor:(NSString *)hashHex {
+    if (!_session) return lt::torrent_handle();
     std::string bytes = ctrl_bytes_from_hex(hashHex);
     auto it = _handlesByHash.find(bytes);
     if (it != _handlesByHash.end() && it->second.is_valid()) return it->second;
@@ -543,6 +568,7 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
     if (!h.is_valid()) return NO;
     _session->remove_torrent(h, deleteFiles ? lt::session::delete_files : lt::remove_flags_t{});
     _handlesByHash.erase(ctrl_bytes_from_hex(infoHash));
+    _resumePending.erase(ctrl_bytes_from_hex(infoHash));
     // Sidecars are keyed by the full hex info hash (lowercased in our
     // writers). Accept any mix-case input here.
     [self deleteSidecarsFor:infoHash.lowercaseString];
@@ -552,7 +578,7 @@ static int ctrl_limited_checking_cap(BOOL queueingEnabled, int activeLimit) {
 - (BOOL)moveTorrent:(NSString *)infoHash toPath:(NSString *)path {
     auto h = [self handleFor:infoHash];
     if (!h.is_valid()) return NO;
-    h.move_storage(path.UTF8String);
+    h.move_storage(path.UTF8String, lt::move_flags_t::fail_if_exist);
     return YES;
 }
 
@@ -857,6 +883,26 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
     s.name          = ctrl_nsstring(st.name);
     s.infoHash      = ctrl_hex_from_bytes(st.info_hashes.get_best().to_string());
     s.savePath      = ctrl_nsstring(st.save_path);
+    s.hasMetadata   = st.has_metadata;
+    s.errorMessage  = st.errc ? ctrl_nsstring(st.errc.message()) : @"";
+    s.contentPath   = @"";
+    if (auto ti = st.torrent_file.lock()) {
+        auto const &files = ti->files();
+        if (files.num_files() > 0) {
+            NSString *relative = ctrl_nsstring(files.file_path(lt::file_index_t{0}));
+            if (files.num_files() > 1) {
+                NSArray *parts = [relative componentsSeparatedByString:@"/"];
+                NSString *top = parts.firstObject;
+                bool common = parts.count > 1;
+                for (lt::file_index_t i{1}; common && i < files.end_file(); ++i) {
+                    NSString *path = ctrl_nsstring(files.file_path(i));
+                    common = [path hasPrefix:[top stringByAppendingString:@"/"]];
+                }
+                relative = common ? top : @"";
+            }
+            s.contentPath = relative.length ? [s.savePath stringByAppendingPathComponent:relative] : s.savePath;
+        }
+    }
     s.progress      = st.progress;
     s.state         = ctrl_map_state(st);
     s.paused        = (st.flags & lt::torrent_flags::paused) ? YES : NO;
@@ -878,15 +924,18 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
 }
 
 - (NSArray<CTRLTorrentStats *> *)pollStats {
-    std::vector<lt::torrent_handle> handles = _session->get_torrents();
-    [self applyResolverModeForTorrentCount:handles.size() reason:@"poll"];
-    NSMutableArray *out = [NSMutableArray arrayWithCapacity:handles.size()];
-    for (auto const &h : handles) {
-        if (!h.is_valid()) continue;
+    if (!_session) return @[];
+    // One network-thread snapshot, without the large pieces/verified-pieces
+    // bitfields that default status() flags copy for every torrent.
+    auto snapshots = _session->get_torrent_status([](lt::torrent_status const &) { return true; },
+        lt::torrent_handle::query_name | lt::torrent_handle::query_save_path | lt::torrent_handle::query_torrent_file);
+    [self applyResolverModeForTorrentCount:snapshots.size() reason:@"poll"];
+    NSMutableArray *out = [NSMutableArray arrayWithCapacity:snapshots.size()];
+    for (auto const &st : snapshots) {
         CTRLTorrentStats *s = [CTRLTorrentStats new];
-        ctrl_fill_stats(s, h.status());
+        ctrl_fill_stats(s, st);
         [out addObject:s];
-        _handlesByHash[h.info_hashes().get_best().to_string()] = h;
+        _handlesByHash[st.info_hashes.get_best().to_string()] = st.handle;
     }
     return out;
 }
@@ -895,11 +944,12 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
     auto h = [self handleFor:infoHash];
     if (!h.is_valid()) return nil;
     CTRLTorrentStats *s = [CTRLTorrentStats new];
-    ctrl_fill_stats(s, h.status());
+    ctrl_fill_stats(s, h.status(lt::torrent_handle::query_name | lt::torrent_handle::query_save_path | lt::torrent_handle::query_torrent_file));
     return s;
 }
 
 - (CTRLSessionStats *)sessionStats {
+    if (!_session) return [CTRLSessionStats new];
     // Snapshot the handle vector once: at 700+ torrents a second
     // get_torrents() copy per stats poll is wasted work.
     std::vector<lt::torrent_handle> handles = _session->get_torrents();
@@ -944,16 +994,18 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
 // MARK: Listen port control
 
 - (void)setListenPort:(uint16_t)port {
+    if (!_session) return;
     if (port == _listenPort) return;
     _listenPort = port;
     lt::settings_pack pack;
     pack.set_str(lt::settings_pack::listen_interfaces,
-                 ctrl_build_listen_interfaces(port, _bindAll).UTF8String);
+                 (_outgoingInterface.length ? [NSString stringWithFormat:@"%@:%u", _outgoingInterface, port] : ctrl_build_listen_interfaces(port, _bindAll)).UTF8String);
     _session->apply_settings(std::move(pack));
     NSLog(@"[Controllarr] listen port -> %u", port);
 }
 
 - (void)setListenInterfacesString:(NSString *)interfaces {
+    if (!_session) return;
     lt::settings_pack pack;
     pack.set_str(lt::settings_pack::listen_interfaces, interfaces.UTF8String);
     _session->apply_settings(std::move(pack));
@@ -961,6 +1013,8 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
 }
 
 - (void)setOutgoingInterface:(NSString *)interfaceName {
+    if (!_session) return;
+    _outgoingInterface = [interfaceName copy];
     lt::settings_pack pack;
     pack.set_str(lt::settings_pack::outgoing_interfaces, interfaceName.UTF8String);
     _session->apply_settings(std::move(pack));
@@ -968,6 +1022,7 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
 }
 
 - (void)setRateLimitsDownloadKBps:(int)downKBps uploadKBps:(int)upKBps {
+    if (!_session) return;
     lt::settings_pack pack;
     // 0 = unlimited in libtorrent
     pack.set_int(lt::settings_pack::download_rate_limit, downKBps > 0 ? downKBps * 1024 : 0);
@@ -976,6 +1031,7 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
 }
 
 - (void)setPeerDiscoveryDHT:(BOOL)dht pex:(BOOL)pex lsd:(BOOL)lsd {
+    if (!_session) return;
     lt::settings_pack pack;
     pack.set_bool(lt::settings_pack::enable_dht, dht ? true : false);
     pack.set_bool(lt::settings_pack::enable_lsd, lsd ? true : false);
@@ -995,6 +1051,9 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
                         connectionsPerTorrent:(int)perTorrentConnections
                                 globalUploads:(int)globalUploads
                              uploadsPerTorrent:(int)perTorrentUploads {
+    if (!_session) return;
+    if (perTorrentConnections > 0) _perTorrentConnections = perTorrentConnections;
+    if (perTorrentUploads > 0) _perTorrentUploads = perTorrentUploads;
     // Session-wide caps go into settings_pack. Per-torrent caps are applied
     // on every currently-running torrent_handle (and re-applied at add-time
     // by add-helpers if we wanted that; libtorrent clamps per-torrent values
@@ -1038,6 +1097,7 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
            activeDownloads:(int)activeDownloads
                activeSeeds:(int)activeSeeds
                activeLimit:(int)activeLimit {
+    if (!_session) return;
     // Queue caps decide which torrents can run; background caps decide how
     // many torrents may announce/check at once. Keep those separate so
     // disabling queueing does not create a tracker/DNS storm on large
@@ -1063,6 +1123,7 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
 }
 
 - (void)forceReannounceAll {
+    if (!_session) return;
     std::vector<lt::torrent_handle> handles = _session->get_torrents();
     [self applyResolverModeForTorrentCount:handles.size() reason:@"mass reannounce"];
 
@@ -1103,47 +1164,47 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
     std::vector<lt::alert *> alerts;
     _session->pop_alerts(&alerts);
     for (lt::alert *a : alerts) {
+        if (auto rd = lt::alert_cast<lt::save_resume_data_alert>(a)) {
+            std::string hash = rd->params.info_hashes.get_best().to_string();
+            _resumePending.erase(hash);
+            auto buf = lt::write_resume_data_buf(rd->params);
+            NSString *path = [_resumeDirectory stringByAppendingPathComponent:
+                              [ctrl_hex_from_bytes(hash) stringByAppendingString:@".fastresume"]];
+            // Removed torrents must never be resurrected by late save alerts.
+            if (_handlesByHash.count(hash) && path.length) {
+                [[NSData dataWithBytes:buf.data() length:buf.size()] writeToFile:path atomically:YES];
+            }
+        } else if (auto failed = lt::alert_cast<lt::save_resume_data_failed_alert>(a)) {
+            if (failed->handle.is_valid()) _resumePending.erase(failed->handle.info_hashes().get_best().to_string());
+        }
         if (a->category() & lt::alert_category::error) {
             NSLog(@"[Controllarr][libtorrent] %s", a->message().c_str());
         }
+    }
+    // A fixed window bounds native alert buffers and filesystem pressure.
+    while (!_resumeQueue.empty() && _resumePending.size() < 16) {
+        auto h = _resumeQueue.front();
+        _resumeQueue.pop_front();
+        if (!h.is_valid()) continue;
+        auto hash = h.info_hashes().get_best().to_string();
+        if (!_handlesByHash.count(hash) || !_resumePending.insert(hash).second) continue;
+        h.save_resume_data(lt::torrent_handle::save_info_dict | lt::torrent_handle::only_if_modified);
     }
 }
 
 // MARK: Resume data
 
 - (void)saveResumeDataTo:(NSString *)directory {
+    if (!_session) return;
+    _resumeDirectory = [directory copy];
     NSFileManager *fm = NSFileManager.defaultManager;
     [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil];
 
-    // Ask libtorrent to emit save_resume_data_alert for every torrent.
+    if (!_resumeQueue.empty() || !_resumePending.empty()) { [self drainAlerts]; return; }
     for (auto const &h : _session->get_torrents()) {
-        if (h.is_valid() && h.status().has_metadata) {
-            h.save_resume_data(lt::torrent_handle::save_info_dict);
-        }
+        if (h.is_valid()) _resumeQueue.push_back(h);
     }
-
-    // Drain alerts for a short window collecting what came back.
-    int outstanding = (int)_session->get_torrents().size();
-    int spins = 0;
-    while (outstanding > 0 && spins < 40) {
-        _session->wait_for_alert(std::chrono::milliseconds(50));
-        std::vector<lt::alert *> alerts;
-        _session->pop_alerts(&alerts);
-        for (lt::alert *a : alerts) {
-            if (auto rd = lt::alert_cast<lt::save_resume_data_alert>(a)) {
-                auto buf = lt::write_resume_data_buf(rd->params);
-                std::string hash = rd->handle.info_hashes().get_best().to_string();
-                NSString *hex = ctrl_hex_from_bytes(hash);
-                NSString *path = [directory stringByAppendingPathComponent:
-                                  [hex stringByAppendingString:@".fastresume"]];
-                [[NSData dataWithBytes:buf.data() length:buf.size()] writeToFile:path atomically:YES];
-                outstanding--;
-            } else if (lt::alert_cast<lt::save_resume_data_failed_alert>(a)) {
-                outstanding--;
-            }
-        }
-        spins++;
-    }
+    [self drainAlerts];
 }
 
 - (void)setMetadataDirectory:(NSString *)directory {
@@ -1271,8 +1332,23 @@ static void ctrl_fill_stats(CTRLTorrentStats *s, lt::torrent_status const &st) {
 }
 
 - (void)shutdown {
+    if (!_session) return;
+    _session->pause();
+    // Bounded final flush. Sidecars remain the recovery fallback on timeout.
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while ((!_resumeQueue.empty() || !_resumePending.empty()) && std::chrono::steady_clock::now() < deadline) {
+        _session->wait_for_alert(std::chrono::milliseconds(20));
+        [self drainAlerts];
+    }
+    _resumeQueue.clear();
+    _resumePending.clear();
     _handlesByHash.clear();
     _session.reset();
+}
+
+- (void)setSessionPaused:(BOOL)paused {
+    if (!_session) return;
+    if (paused) _session->pause(); else _session->resume();
 }
 
 - (void)dealloc {

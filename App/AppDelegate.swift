@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// messages and not break state restoration.
     private weak var forwardingWindowDelegate: NSWindowDelegate?
     private var windowAttached: Bool = false
+    private var terminating = false
 
     /// Files/URLs received before the runtime finishes booting.
     /// Drained once RuntimeViewModel.isBooting becomes false.
@@ -171,17 +172,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.sendAction(Selector(("newWindowForTab:")), to: nil, from: nil)
     }
 
-    nonisolated func applicationWillTerminate(_ notification: Notification) {
+    nonisolated func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
-            statsTimer?.invalidate()
-            statsTimer = nil
+            if !terminating {
+                terminating = true
+                statsTimer?.invalidate()
+                statsTimer = nil
+                Task { @MainActor in
+                    await RuntimeViewModel.shared.shutdown()
+                    sender.reply(toApplicationShouldTerminate: true)
+                }
+            }
+            return .terminateLater
         }
-        let sema = DispatchSemaphore(value: 0)
-        Task {
-            await RuntimeViewModel.shared.shutdown()
-            sema.signal()
-        }
-        _ = sema.wait(timeout: .now() + 5)
     }
 
     // MARK: - File open handling (.torrent files from Finder / double-click)

@@ -29,7 +29,7 @@ public enum TorrentState: Int, Sendable, Codable {
     }
 }
 
-public struct TorrentStats: Sendable, Identifiable, Codable {
+public struct TorrentStats: Sendable, Identifiable, Codable, Equatable {
     public var id: String { infoHash }
     public let name: String
     public let infoHash: String
@@ -51,9 +51,13 @@ public struct TorrentStats: Sendable, Identifiable, Codable {
     /// Optional overlay: Controllarr's category name, if one was set when
     /// the torrent was added.
     public var category: String?
+    public var contentPath: String = ""
+    public var hasMetadata: Bool = true
+    public var errorMessage: String = ""
+    public var apiSavePath: String = ""
 }
 
-public struct SessionStats: Sendable, Codable {
+public struct SessionStats: Sendable, Codable, Equatable {
     public let downloadRate: Int64
     public let uploadRate: Int64
     public let totalDownloaded: Int64
@@ -264,15 +268,27 @@ public actor TorrentEngine {
     private var blockedExtensionsByCategory: [String: [String]] = [:]
     private var cachedSnapshot: CachedSnapshot?
     private let snapshotCacheTTL: TimeInterval = 0.5
+    private var boundInterface: String = ""
+    private var networkPaused = true
+    private var requestedDiscovery = (dht: true, pex: true, lsd: false)
+    private var storageFolders: [String: String] = [:]
+    private var folderSaveTask: Task<Void, Never>?
+    private let folderPolicy: @Sendable (String?) async -> Bool
 
     public init(
         defaultSavePath: URL,
         resumeDataDirectory: URL,
         listenPort: UInt16,
-        resolver: @escaping CategoryResolver = nullCategoryResolver
+        resolver: @escaping CategoryResolver = nullCategoryResolver,
+        folderPolicy: @escaping @Sendable (String?) async -> Bool = { _ in false }
     ) {
         self.defaultSavePath = defaultSavePath
         self.resumeDir = resumeDataDirectory
+        self.folderPolicy = folderPolicy
+        if let data = try? Data(contentsOf: resumeDataDirectory.appendingPathComponent("folders.json")),
+           let saved = try? JSONDecoder().decode([String: String].self, from: data) {
+            self.storageFolders = saved.filter { !$0.value.contains("/") && $0.value != ".." }
+        }
         self.listenPort = listenPort
         self.resolver = resolver
 
@@ -295,7 +311,7 @@ public actor TorrentEngine {
 
     // MARK: Adding
 
-    public func addMagnet(_ uri: String, category: String? = nil, explicitSavePath: String? = nil) async throws -> String {
+    public func addMagnet(_ uri: String, category: String? = nil, explicitSavePath: String? = nil, createSubfolder: Bool? = nil) async throws -> String {
         let savePath: String?
         if let explicitSavePath {
             savePath = explicitSavePath
@@ -303,19 +319,22 @@ public actor TorrentEngine {
             savePath = try await resolvedSavePath(for: category)
         }
         do {
-            try session.addMagnet(uri, savePath: savePath)
+            let hash = session.infoHash(forMagnet: uri) ?? ""
+            let enabled = await folderPolicy(category)
+            let path = intakePath(root: savePath, hash: hash, name: URLComponents(string: uri)?.queryItems?.first(where: { $0.name == "dn" })?.value, createFolder: createSubfolder ?? enabled)
+            try session.addMagnet(uri, savePath: path)
         } catch {
             throw TorrentEngineError.addFailed(error.localizedDescription)
         }
         invalidateSnapshotCache()
         // libtorrent doesn't return the hash from parse_magnet_uri via the
         // Obj-C bridge; walk the snapshot for a freshly-added torrent.
-        let hash = latestHashFromSnapshot()
+        let hash = session.infoHash(forMagnet: uri)
         if let hash, let category { categoryByHash[hash] = category }
         return hash ?? ""
     }
 
-    public func addTorrentFile(at path: URL, category: String? = nil, explicitSavePath: String? = nil) async throws -> String {
+    public func addTorrentFile(at path: URL, category: String? = nil, explicitSavePath: String? = nil, createSubfolder: Bool? = nil) async throws -> String {
         let savePath: String?
         if let explicitSavePath {
             savePath = explicitSavePath
@@ -323,12 +342,15 @@ public actor TorrentEngine {
             savePath = try await resolvedSavePath(for: category)
         }
         do {
-            try session.addTorrentFile(path.path, savePath: savePath)
+            let hash = session.infoHash(forTorrentFile: path.path) ?? ""
+            let enabled = await folderPolicy(category)
+            let target = intakePath(root: savePath, hash: hash, name: path.deletingPathExtension().lastPathComponent, createFolder: createSubfolder ?? enabled)
+            try session.addTorrentFile(path.path, savePath: target)
         } catch {
             throw TorrentEngineError.addFailed(error.localizedDescription)
         }
         invalidateSnapshotCache()
-        let hash = latestHashFromSnapshot()
+        let hash = session.infoHash(forTorrentFile: path.path)
         if let hash, let category { categoryByHash[hash] = category }
         return hash ?? ""
     }
@@ -353,7 +375,8 @@ public actor TorrentEngine {
         category: String? = nil,
         explicitSavePath: String? = nil,
         policy: DuplicatePolicyMode,
-        interactive: Bool
+        interactive: Bool,
+        createSubfolder: Bool? = nil
     ) async throws -> TorrentAddResult {
         guard let incomingHash = session.infoHash(forMagnet: uri),
               !incomingHash.isEmpty else {
@@ -373,7 +396,7 @@ public actor TorrentEngine {
             )
         }
 
-        let h = try await addMagnet(uri, category: category, explicitSavePath: explicitSavePath)
+        let h = try await addMagnet(uri, category: category, explicitSavePath: explicitSavePath, createSubfolder: createSubfolder)
         return .added(infoHash: h)
     }
 
@@ -384,7 +407,8 @@ public actor TorrentEngine {
         category: String? = nil,
         explicitSavePath: String? = nil,
         policy: DuplicatePolicyMode,
-        interactive: Bool
+        interactive: Bool,
+        createSubfolder: Bool? = nil
     ) async throws -> TorrentAddResult {
         guard let incomingHash = session.infoHash(forTorrentFile: path.path),
               !incomingHash.isEmpty else {
@@ -402,7 +426,7 @@ public actor TorrentEngine {
             )
         }
 
-        let h = try await addTorrentFile(at: path, category: category, explicitSavePath: explicitSavePath)
+        let h = try await addTorrentFile(at: path, category: category, explicitSavePath: explicitSavePath, createSubfolder: createSubfolder)
         return .added(infoHash: h)
     }
 
@@ -522,9 +546,9 @@ public actor TorrentEngine {
     public func applyQueueing(enabled: Bool, activeDownloads: Int, activeSeeds: Int, activeLimit: Int) {
         session.setQueueingEnabled(
             enabled,
-            activeDownloads: Int32(activeDownloads),
-            activeSeeds: Int32(activeSeeds),
-            activeLimit: Int32(activeLimit)
+            activeDownloads: Int32(clamping: max(0, min(10000, activeDownloads))),
+            activeSeeds: Int32(clamping: max(0, min(10000, activeSeeds))),
+            activeLimit: Int32(clamping: max(0, min(10000, activeLimit)))
         )
     }
 
@@ -532,15 +556,64 @@ public actor TorrentEngine {
     public func remove(infoHash: String, deleteFiles: Bool) -> Bool {
         categoryByHash.removeValue(forKey: infoHash)
         let didRemove = session.removeTorrent(infoHash, deleteFiles: deleteFiles)
-        if didRemove { invalidateSnapshotCache() }
+        if didRemove {
+            fileFilterApplied.remove(infoHash)
+            storageFolders.removeValue(forKey: infoHash)
+            invalidateSnapshotCache()
+        }
         return didRemove
     }
 
     @discardableResult
     public func move(infoHash: String, to path: URL) -> Bool {
-        let didMove = session.moveTorrent(infoHash, toPath: path.path)
+        let target = destinationPath(for: infoHash, root: path.path)
+        let didMove = session.moveTorrent(infoHash, toPath: target)
         if didMove { invalidateSnapshotCache() }
         return didMove
+    }
+
+    public func destinationPath(for hash: String, root: String) -> String {
+        let url = URL(fileURLWithPath: root).standardizedFileURL
+        guard let folder = storageFolders[hash], url.lastPathComponent != folder else { return url.path }
+        return url.appendingPathComponent(folder, isDirectory: true).path
+    }
+
+    public func repairContentLayout(infoHash: String) -> Bool {
+        guard let torrent = stats(for: infoHash), torrent.hasMetadata else { return false }
+        if storageFolders[infoHash] != nil || torrent.contentPath != torrent.savePath { return true }
+        let folder = "Torrent [\(infoHash.prefix(12))]"
+        let destination = URL(fileURLWithPath: torrent.savePath).appendingPathComponent(folder)
+        guard !FileManager.default.fileExists(atPath: destination.path) else { return false }
+        storageFolders[infoHash] = folder
+        if !move(infoHash: infoHash, to: destination) { storageFolders.removeValue(forKey: infoHash); return false }
+        saveFolders()
+        return true
+    }
+
+    private func intakePath(root: String?, hash: String, name: String?, createFolder: Bool) -> String? {
+        guard createFolder, !hash.isEmpty, let root, !session.hasTorrent(hash) else { return root }
+        let safe = String((name ?? "Torrent").map { "/\\:\0".contains($0) || $0.isNewline ? "_" : $0 }.prefix(100))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let folder = "\(safe.isEmpty ? "Torrent" : safe) [\(hash.prefix(12))]"
+        storageFolders[hash] = folder
+        if folderSaveTask == nil {
+            folderSaveTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                await self?.saveFolders()
+            }
+        }
+        let target = URL(fileURLWithPath: root).appendingPathComponent(folder, isDirectory: true)
+        try? FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        return target.path
+    }
+
+    private func saveFolders() {
+        folderSaveTask?.cancel()
+        folderSaveTask = nil
+        if let data = try? JSONEncoder().encode(storageFolders) {
+            try? data.write(to: resumeDir.appendingPathComponent("folders.json"), options: .atomic)
+        }
     }
 
     public func setCategory(_ category: String?, for infoHash: String) {
@@ -682,7 +755,8 @@ public actor TorrentEngine {
     /// skip the blocked files. Idempotent — each hash is only processed
     /// once. Called on every poll tick by the runtime.
     public func applyPendingFileFilters() {
-        for torrent in materializeSnapshot(forceRefresh: true).torrents {
+        var changed = false
+        for torrent in materializeSnapshot().torrents {
             let hash = torrent.infoHash
             if fileFilterApplied.contains(hash) { continue }
             guard let category = categoryByHash[hash],
@@ -703,9 +777,10 @@ public actor TorrentEngine {
                 return blocked.contains(ext) ? NSNumber(value: 0) : NSNumber(value: 4)
             }
             _ = session.setFilePriorities(priorities, forInfoHash: hash)
+            changed = true
             fileFilterApplied.insert(hash)
         }
-        invalidateSnapshotCache()
+        if changed { invalidateSnapshotCache() }
     }
 
     // MARK: Reading
@@ -742,7 +817,7 @@ public actor TorrentEngine {
     }
 
     private func bridge(_ s: CTRLTorrentStats) -> TorrentStats {
-        TorrentStats(
+        var result = TorrentStats(
             name: s.name,
             infoHash: s.infoHash,
             savePath: s.savePath,
@@ -762,6 +837,12 @@ public actor TorrentEngine {
             addedDate: s.addedDate,
             category: categoryByHash[s.infoHash]
         )
+        result.contentPath = s.contentPath
+        result.hasMetadata = s.hasMetadata
+        result.errorMessage = s.errorMessage
+        result.apiSavePath = storageFolders[s.infoHash] == URL(fileURLWithPath: s.savePath).lastPathComponent
+            ? URL(fileURLWithPath: s.savePath).deletingLastPathComponent().path : s.savePath
+        return result
     }
 
     // MARK: Listen port (the feature)
@@ -769,6 +850,9 @@ public actor TorrentEngine {
     public func setListenPort(_ port: UInt16) {
         self.listenPort = port
         session.setListenPort(port)
+        if !boundInterface.isEmpty {
+            session.setListenInterfacesString("\(boundInterface):\(port)")
+        }
         invalidateSnapshotCache()
     }
 
@@ -783,19 +867,21 @@ public actor TorrentEngine {
     /// interface (e.g. "utun4" or "10.0.0.1"). Empty string reverts
     /// to OS default routing.
     public func setOutgoingInterface(_ name: String) {
+        boundInterface = name
         session.setOutgoingInterface(name)
         invalidateSnapshotCache()
     }
 
     /// Set global download/upload rate limits. 0 = unlimited.
     public func setRateLimits(downloadKBps: Int?, uploadKBps: Int?) {
-        session.setRateLimitsDownloadKBps(Int32(downloadKBps ?? 0), uploadKBps: Int32(uploadKBps ?? 0))
+        session.setRateLimitsDownloadKBps(Int32(clamping: max(0, min(1_000_000, downloadKBps ?? 0))), uploadKBps: Int32(clamping: max(0, min(1_000_000, uploadKBps ?? 0))))
         invalidateSnapshotCache()
     }
 
     /// Toggle DHT / PeX / LSD peer discovery. PeX is applied on next restart.
     public func setPeerDiscovery(dht: Bool, pex: Bool, lsd: Bool) {
-        session.setPeerDiscoveryDHT(dht, pex: pex, lsd: lsd)
+        requestedDiscovery = (dht, pex, lsd)
+        session.setPeerDiscoveryDHT(dht && !networkPaused, pex: pex, lsd: lsd && !networkPaused)
     }
 
     /// Apply connection-count ceilings. Pass nil/0 to leave the current value.
@@ -806,10 +892,10 @@ public actor TorrentEngine {
         perTorrentUploads: Int?
     ) {
         session.setConnectionLimitsGlobalConnections(
-            Int32(globalConnections ?? 0),
-            connectionsPerTorrent: Int32(perTorrentConnections ?? 0),
-            globalUploads: Int32(globalUploads ?? 0),
-            uploadsPerTorrent: Int32(perTorrentUploads ?? 0)
+            Int32(clamping: max(0, min(1_000_000, globalConnections ?? 0))),
+            connectionsPerTorrent: Int32(clamping: max(0, min(1_000_000, perTorrentConnections ?? 0))),
+            globalUploads: Int32(clamping: max(0, min(1_000_000, globalUploads ?? 0))),
+            uploadsPerTorrent: Int32(clamping: max(0, min(1_000_000, perTorrentUploads ?? 0)))
         )
     }
 
@@ -822,11 +908,32 @@ public actor TorrentEngine {
 
     public func drainAlerts() { session.drainAlerts() }
 
+    public func setNetworkPaused(_ paused: Bool) {
+        guard networkPaused != paused else { return }
+        networkPaused = paused
+        session.setPeerDiscoveryDHT(requestedDiscovery.dht && !paused, pex: requestedDiscovery.pex, lsd: requestedDiscovery.lsd && !paused)
+        session.setSessionPaused(paused)
+        invalidateSnapshotCache()
+    }
+
+    public func remove(hashes: [String], deleteFiles: Bool) async -> Int {
+        let unique = Set(hashes)
+        for hash in unique { _ = pause(infoHash: hash) }
+        var removed = 0
+        for (index, hash) in unique.enumerated() {
+            if remove(infoHash: hash, deleteFiles: deleteFiles) { removed += 1 }
+            if index % 32 == 0 { await Task.yield() }
+        }
+        return removed
+    }
+
     public func saveResumeData() {
+        saveFolders()
         session.saveResumeData(to: resumeDir.path)
     }
 
     public func shutdown() {
+        saveFolders()
         session.saveResumeData(to: resumeDir.path)
         session.shutdown()
     }

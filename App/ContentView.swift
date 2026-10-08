@@ -579,6 +579,8 @@ struct TorrentsView: View {
     /// click / shift-click to select multiple rows for batch operations
     /// (mass pause, mass recheck, mass reannounce, mass delete).
     @State private var selectedHashes: Set<String> = []
+    @State private var removalHashes: Set<String> = []
+    @State private var repairHashes: Set<String> = []
     /// Free-text search over name / category / info-hash. Ephemeral (not
     /// persisted) so each launch starts with the full list visible.
     @State private var searchText: String = ""
@@ -787,25 +789,8 @@ struct TorrentsView: View {
 
             Divider()
 
-            Button {
-                Task {
-                    for t in selected {
-                        await vm.remove(hash: t.infoHash, deleteFiles: false)
-                    }
-                }
-            } label: {
-                Label("Remove (keep files)", systemImage: "minus.circle")
-            }
-
-            Button(role: .destructive) {
-                Task {
-                    for t in selected {
-                        await vm.remove(hash: t.infoHash, deleteFiles: true)
-                    }
-                }
-            } label: {
-                Label("Remove and delete files", systemImage: "trash")
-            }
+            Button("Repair import folder layout...") { repairHashes = Set(selected.map(\.infoHash)) }
+            Button("Remove...", role: .destructive) { removalHashes = Set(selected.map(\.infoHash)) }
         }
     }
 
@@ -1004,22 +989,7 @@ struct TorrentsView: View {
                             Label("Force Recheck", systemImage: "checkmark.seal")
                         }
 
-                        Menu {
-                            Button("Remove torrent\(selectedHashes.count > 1 ? "s" : "") (keep files)") {
-                                Task {
-                                    for t in selectedTorrents {
-                                        await vm.remove(hash: t.infoHash, deleteFiles: false)
-                                    }
-                                }
-                            }
-                            Button("Remove torrent\(selectedHashes.count > 1 ? "s" : "") and delete files", role: .destructive) {
-                                Task {
-                                    for t in selectedTorrents {
-                                        await vm.remove(hash: t.infoHash, deleteFiles: true)
-                                    }
-                                }
-                            }
-                        } label: {
+                        Button { removalHashes = selectedHashes } label: {
                             Label("Remove", systemImage: "trash")
                         }
 
@@ -1068,6 +1038,23 @@ struct TorrentsView: View {
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             handleDrop(providers)
         }
+        .onDeleteCommand { removalHashes = selectedHashes }
+        .modifier(TorrentRemovalConfirmation(vm: vm, hashes: $removalHashes))
+        .confirmationDialog("Repair import folder layout?", isPresented: Binding(get: { !repairHashes.isEmpty }, set: { if !$0 { repairHashes = [] } })) {
+            Button("Move Flat Content into Torrent Subfolders") {
+                let hashes = repairHashes
+                repairHashes = []
+                Task {
+                    for hash in hashes {
+                        if await vm.runtime?.engine.repairContentLayout(infoHash: hash) != true {
+                            vm.bootError = "Folder repair rejected for \(hash). Metadata must be ready and the destination must be free."
+                        }
+                    }
+                    await vm.refreshAll()
+                }
+            }
+            Button("Cancel", role: .cancel) { repairHashes = [] }
+        } message: { Text("Existing proper folders are left alone. Flat content is moved on disk; this is not just a category setting.") }
         .sheet(isPresented: $addOpen) {
             addMagnetSheet
                 .frame(minWidth: 460, minHeight: 220)
@@ -1488,6 +1475,8 @@ private struct CategoryDetail: View {
     let category: Persistence.Category
     @Bindable var vm: RuntimeViewModel
     @State private var statusFilter: TorrentStatusFilter = .all
+    @State private var selection: Set<String> = []
+    @State private var removalHashes: Set<String> = []
 
     private var categoryTorrents: [TorrentStats] {
         vm.torrents
@@ -1532,7 +1521,7 @@ private struct CategoryDetail: View {
                 }
                 .padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 2)
 
-                Table(categoryTorrents) {
+                Table(categoryTorrents, selection: $selection) {
                     TableColumn("Name") { t in
                         Text(t.name).lineLimit(1).truncationMode(.middle)
                     }
@@ -1555,9 +1544,33 @@ private struct CategoryDetail: View {
                         Text(String(format: "%.2f", t.ratio)).monospacedDigit().font(.caption)
                     }.width(min: 55, ideal: 65)
                 }
+                .contextMenu(forSelectionType: String.self) { hashes in
+                    Button("Pause Selected") { Task { for hash in hashes { await vm.pause(hash: hash) } } }
+                    Button("Resume Selected") { Task { for hash in hashes { await vm.resume(hash: hash) } } }
+                    Button("Remove...", role: .destructive) { removalHashes = hashes }.disabled(hashes.isEmpty)
+                }
+                .onDeleteCommand { removalHashes = selection }
             }
             .frame(minHeight: 180)
         }
+        .modifier(TorrentRemovalConfirmation(vm: vm, hashes: $removalHashes))
+    }
+}
+
+private struct TorrentRemovalConfirmation: ViewModifier {
+    let vm: RuntimeViewModel
+    @Binding var hashes: Set<String>
+    func body(content: Content) -> some View {
+        content.confirmationDialog("Remove \(hashes.count) torrent(s)?", isPresented: Binding(get: { !hashes.isEmpty }, set: { if !$0 { hashes = [] } })) {
+            Button("Remove from Controllarr (Keep Files)") { remove(false) }
+            Button("Remove and Delete Files", role: .destructive) { remove(true) }
+            Button("Cancel", role: .cancel) { hashes = [] }
+        } message: { Text("All selected torrents are stopped before removal. Disk deletion cannot be undone.") }
+    }
+    private func remove(_ files: Bool) {
+        let captured = Array(hashes)
+        hashes = []
+        Task { await vm.remove(hashes: captured, deleteFiles: files) }
     }
 }
 
@@ -1566,6 +1579,7 @@ private struct CategoryEditor: View {
     @State var savePath: String
     @State var completePath: String
     @State var extractArchives: Bool
+    @State var createTorrentSubfolder: Bool
     @State var blockedExtensions: String
     @State var hasMaxRatio: Bool
     @State var maxRatio: Double
@@ -1582,6 +1596,7 @@ private struct CategoryEditor: View {
         _savePath = State(initialValue: original.savePath)
         _completePath = State(initialValue: original.completePath ?? "")
         _extractArchives = State(initialValue: original.extractArchives)
+        _createTorrentSubfolder = State(initialValue: original.createTorrentSubfolder)
         _blockedExtensions = State(initialValue: original.blockedExtensions.joined(separator: ", "))
         _hasMaxRatio = State(initialValue: original.maxRatio != nil)
         _maxRatio = State(initialValue: original.maxRatio ?? 2.0)
@@ -1600,6 +1615,9 @@ private struct CategoryEditor: View {
                     TextField("Name", text: $name).disabled(!isNew)
                     TextField("Save path", text: $savePath)
                     TextField("Complete path (optional)", text: $completePath)
+                    Toggle("Create a subfolder for each new torrent", isOn: $createTorrentSubfolder)
+                    Text("Trailing slashes are optional. Existing torrents are not moved by this setting.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Post-complete") {
                     Toggle("Extract archives (.rar/.zip/.7z)", isOn: $extractArchives)
@@ -1638,7 +1656,8 @@ private struct CategoryEditor: View {
                         extractArchives: extractArchives,
                         blockedExtensions: blocked,
                         maxRatio: hasMaxRatio ? maxRatio : nil,
-                        maxSeedingTimeMinutes: hasMaxSeedTime ? maxSeedTimeMinutes : nil
+                        maxSeedingTimeMinutes: hasMaxSeedTime ? maxSeedTimeMinutes : nil,
+                        createTorrentSubfolder: createTorrentSubfolder
                     )
                     onSave(cat)
                 }
@@ -1821,6 +1840,7 @@ struct SettingsView: View {
         Form {
             Section("WebUI") {
                 TextField("Bind host", text: binding.webUIHost)
+                Toggle("Advertise server to iOS on the LAN (restart required)", isOn: binding.remoteDiscoveryEnabled)
                 intPortRow(title: "Port", binding: binding.webUIPort)
                 TextField("Username", text: binding.webUIUsername)
                 SecureField("Password", text: binding.webUIPassword)

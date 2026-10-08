@@ -98,6 +98,7 @@ public struct RecoveryRule: Codable, Sendable, Equatable, Identifiable {
 public struct Category: Codable, Sendable, Equatable, Identifiable {
     public var id: String { name }
     public var name: String
+    public var createTorrentSubfolder: Bool
     /// Where the torrent is downloaded initially. This is the path that
     /// goes into libtorrent's save_path at add-time.
     public var savePath: String
@@ -131,9 +132,11 @@ public struct Category: Codable, Sendable, Equatable, Identifiable {
         blockedExtensions: [String] = [],
         maxRatio: Double? = nil,
         maxSeedingTimeMinutes: Int? = nil,
-        dangerousPatterns: [String] = []
+        dangerousPatterns: [String] = [],
+        createTorrentSubfolder: Bool = true
     ) {
         self.name = name
+        self.createTorrentSubfolder = createTorrentSubfolder
         self.savePath = savePath
         self.completePath = completePath
         self.extractArchives = extractArchives
@@ -148,6 +151,7 @@ public struct Category: Codable, Sendable, Equatable, Identifiable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.name = try c.decode(String.self, forKey: .name)
+        self.createTorrentSubfolder = try c.decodeIfPresent(Bool.self, forKey: .createTorrentSubfolder) ?? false
         self.savePath = try c.decode(String.self, forKey: .savePath)
         self.completePath = try c.decodeIfPresent(String.self, forKey: .completePath)
         self.extractArchives = try c.decodeIfPresent(Bool.self, forKey: .extractArchives) ?? false
@@ -394,6 +398,7 @@ public struct ArrEndpoint: Codable, Sendable, Equatable, Identifiable {
 }
 
 public struct Settings: Codable, Sendable, Equatable {
+    public var remoteDiscoveryEnabled: Bool = true
     /// Inclusive range of ports the PortWatcher may pick from when
     /// reselecting. Inclusive on both ends.
     public var listenPortRangeStart: UInt16
@@ -552,6 +557,7 @@ public struct Settings: Codable, Sendable, Equatable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.listenPortRangeStart = try c.decode(UInt16.self, forKey: .listenPortRangeStart)
+        self.remoteDiscoveryEnabled = try c.decodeIfPresent(Bool.self, forKey: .remoteDiscoveryEnabled) ?? true
         self.listenPortRangeEnd = try c.decode(UInt16.self, forKey: .listenPortRangeEnd)
         self.preferredListenPort = try c.decodeIfPresent(UInt16.self, forKey: .preferredListenPort)
         self.stallThresholdMinutes = try c.decode(Int.self, forKey: .stallThresholdMinutes)

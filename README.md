@@ -17,6 +17,12 @@ The project is built around a common media-server pain point: torrent traffic sh
 
 **Current status:** Controllarr is public and usable, with active releases focused on VPN-safe operation, qBittorrent API compatibility, large-library stability, and smoother native/WebUI controls.
 
+**v2.3.0:** bounded resume checkpointing, lower-overhead snapshots, session-level VPN startup/disconnect protection, two-worker archive extraction, category subfolder controls, and corrected Sonarr content paths. Native tables support confirmed pause-first bulk removal, including category selection and the Delete key. Existing storage is not silently reorganized; use **Repair import folder layout** when needed.
+
+**iOS Remote 1.0 preview:** a native iPhone/iPad manager is included in [iOS](iOS/README.md), supporting multiple instances, LAN discovery, hostname/HTTPS connections, paged torrents, bulk controls, categories, settings, file priorities and notification options. Source and simulator builds are previews, not a publicly installable IPA or TestFlight release. Reliable background push requires additional APNs infrastructure. See [mobile setup](docs/MOBILE.md), [remote protocol](docs/REMOTE_API.md) and the honest [platform parity matrix](docs/PARITY.md).
+
+Windows x64/ARM64 installers live in the [Windows project](https://emacth3creator.github.io/Controllarr-Windows/). The engines and advanced controls are not identical across platforms.
+
 ## Why Controllarr?
 
 - Run a Mac mini as a dedicated torrent target for Sonarr, Radarr, Overseerr, and Plex workflows.
@@ -48,16 +54,14 @@ The project is built around a common media-server pain point: torrent traffic sh
 
 1. Download the newest macOS zip from the [latest GitHub release](https://github.com/eMacTh3Creator/Controllarr/releases/latest).
 2. Unzip it and move `Controllarr.app` to `/Applications`.
-3. Right-click `Controllarr.app` and choose **Open** the first time.
+3. Open `Controllarr.app` normally.
 
-If macOS still blocks launch, self-sign the app and clear quarantine:
-
-```sh
-codesign --force --deep -s - /Applications/Controllarr.app
-xattr -rd com.apple.quarantine /Applications/Controllarr.app
-```
-
-The app is currently ad-hoc signed. If you install it somewhere other than `/Applications`, replace the path in both commands.
+The v2.3.0 Mac release is Developer ID signed, Apple notarized and stapled.
+No self-signing or quarantine-removal command is needed. macOS can still show
+its normal first-launch confirmation and network permission prompts. Do not
+re-sign the downloaded app: that replaces its verified publisher signature.
+If macOS reports a damaged or unverified download, download a fresh copy from
+the official release rather than disabling security checks.
 
 Controllarr checks weekly for signed Sparkle updates and prompts when a newer
 release is available. It does not silently install updates.
@@ -124,6 +128,7 @@ This design separates control traffic from torrent traffic: the API/WebUI can be
 
 Recent release line:
 
+- **v2.3.0:** Mac resource/lifecycle hardening, clean category folders and Sonarr import compatibility, shared remote protocol and native iOS source/simulator preview.
 - **v2.1.15:** persistent on-disk log that survives crashes/reboots, plus a "Reveal Log File" button for post-mortem diagnosis.
 - **v2.1.14:** gentler networking for large libraries (capped new-connection rate, large-library mode engages at ~250 torrents, sticky VPN interface) to mitigate configd-watchdog reboots.
 - **v2.1.13:** critical fix for a launch crash in 2.1.11/2.1.12 on Macs without Homebrew (library paths are now fully self-contained, enforced by a build gate).
@@ -248,7 +253,7 @@ Controllarr is public and usable, but it is still moving quickly. The safest pro
 
 Since v2.1.8, Controllarr keeps the WebUI password and *arr API keys in its
 portable app-state file rather than the macOS Keychain. This is what stops the
-repeated Keychain prompts on ad-hoc public builds, but it also means those
+repeated Keychain prompts seen with older ad-hoc public builds, but it also means those
 secrets are stored in clear text inside the Application Support state
 directory. Protect that directory with normal file permissions, and do not
 share your raw state file. When upgrading from an older Keychain-backed build,

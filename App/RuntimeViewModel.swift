@@ -80,7 +80,17 @@ final class RuntimeViewModel {
     func boot() async {
         guard runtime == nil else { return }
         let webUIRoot = Bundle.main.url(forResource: "dist", withExtension: nil)
-        let rt = await ControllarrRuntime(webUIRoot: webUIRoot)
+        let environment = ProcessInfo.processInfo.environment
+        let profile = environment["CONTROLLARR_STATE_DIR"]
+        let port = environment["CONTROLLARR_HTTP_PORT"].flatMap(Int.init)
+        guard profile == nil || profile!.hasPrefix("/"),
+              environment["CONTROLLARR_HTTP_PORT"] == nil || port.map({ (1...65535).contains($0) }) == true else {
+            bootError = "Invalid isolated profile path or HTTP port override."
+            isBooting = false
+            return
+        }
+        let rt = await ControllarrRuntime(webUIRoot: webUIRoot,
+            storeDirectory: profile.map { URL(fileURLWithPath: $0) }, httpPortOverride: port)
         self.runtime = rt
         do {
             try await rt.start()
@@ -101,6 +111,8 @@ final class RuntimeViewModel {
     func shutdown() async {
         fastPollTask?.cancel()
         slowPollTask?.cancel()
+        await fastPollTask?.value
+        await slowPollTask?.value
         fastPollTask = nil
         slowPollTask = nil
         await runtime?.shutdown()
@@ -161,8 +173,8 @@ final class RuntimeViewModel {
         let disk = await ds
         let vpnStatus = await vp
 
-        self.torrents = torrents
-        self.session = session
+        if self.torrents != torrents { self.torrents = torrents }
+        if self.session != session { self.session = session }
         self.healthIssues = health
         self.postRecords = post
         self.diskSpaceStatus = disk
@@ -308,6 +320,13 @@ final class RuntimeViewModel {
     func remove(hash: String, deleteFiles: Bool) async {
         guard let runtime else { return }
         _ = await runtime.engine.remove(infoHash: hash, deleteFiles: deleteFiles)
+        await refreshFast()
+    }
+
+    func remove(hashes: [String], deleteFiles: Bool) async {
+        guard let runtime else { return }
+        _ = await runtime.engine.remove(hashes: hashes, deleteFiles: deleteFiles)
+        await runtime.store.setCategoryMap(runtime.engine.snapshotCategories())
         await refreshFast()
     }
 

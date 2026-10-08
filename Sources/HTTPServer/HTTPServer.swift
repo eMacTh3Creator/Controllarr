@@ -76,6 +76,9 @@ public actor HTTPServer {
     private let configuration: Configuration
     private let services: Services
     private var runTask: Task<Void, Error>?
+    private var eventTask: Task<Void, Never>?
+    private let remoteEvents = RemoteEvents()
+    private var discovery: RemoteDiscovery?
 
     public init(configuration: Configuration, services: Services) {
         self.configuration = configuration
@@ -98,6 +101,7 @@ public actor HTTPServer {
         )
 
         router.add(middleware: AuthMiddleware(sessions: sessions))
+        RemoteAPI.install(on: router, services: services, events: remoteEvents)
 
         // Static WebUI. Registered last so /api/* routes win.
         StaticWebUI.install(on: router, rootDirectory: configuration.webUIRoot)
@@ -121,10 +125,31 @@ public actor HTTPServer {
                 throw error
             }
         }
+        let discovery = await RemoteDiscovery()
+        if await services.store.settings().remoteDiscoveryEnabled { await discovery.start(host: host, port: port) }
+        self.discovery = discovery
+        let events = remoteEvents
+        let services = self.services
+        eventTask = Task {
+            while !Task.isCancelled {
+                let torrents = await services.engine.pollStats()
+                let stats = await services.engine.sessionStats()
+                let vpn = await services.vpnMonitor.snapshot()
+                let settings = await services.store.settings()
+                await events.observe(torrents, port: stats.listenPort, vpnEnabled: settings.vpnEnabled, connected: vpn.isConnected)
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
     }
 
     public func stop() async {
+        eventTask?.cancel()
+        await eventTask?.value
+        eventTask = nil
+        await discovery?.stop()
+        discovery = nil
         runTask?.cancel()
+        _ = try? await runTask?.value
         runTask = nil
     }
 
@@ -133,7 +158,7 @@ public actor HTTPServer {
            !version.isEmpty {
             return "Controllarr/\(version)"
         }
-        return "Controllarr/2.1.15"
+        return "Controllarr/2.3.0"
     }
 }
 

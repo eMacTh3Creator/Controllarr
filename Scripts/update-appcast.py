@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Write Controllarr's Sparkle appcast for a signed release zip.
 
-The private Ed25519 key stays in the macOS Keychain. This script calls
-Sparkle's sign_update tool and commits only the public appcast metadata.
+The private Ed25519 key comes from a secure publisher environment, or from
+Keychain only with explicit opt-in. Only public appcast metadata is written.
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ def main() -> int:
     parser.add_argument("--build", required=True, help="CFBundleVersion / Sparkle version, for example 217")
     parser.add_argument("--zip", required=True, type=Path, help="Path to the release zip")
     parser.add_argument("--output", default=ROOT / "appcast.xml", type=Path, help="Appcast path")
+    parser.add_argument("--allow-keychain", action="store_true", help="Allow publisher-only Keychain interaction")
     args = parser.parse_args()
 
     zip_path = args.zip.resolve()
@@ -45,21 +46,23 @@ def main() -> int:
         raise FileNotFoundError(SIGN_UPDATE)
 
     private_key = os.environ.get("SPARKLE_PRIVATE_KEY")
-    if private_key:
+    if not private_key and not args.allow_keychain:
+        print("Signing requires SPARKLE_PRIVATE_KEY from a secure publisher environment or explicit --allow-keychain. Existing appcast was not changed.", file=sys.stderr)
+        return 1
+    command = ([str(SIGN_UPDATE), "--ed-key-file", "-", str(zip_path)] if private_key else
+               [str(SIGN_UPDATE), "--account", SPARKLE_ACCOUNT, str(zip_path)])
+    try:
         signed = subprocess.run(
-            [str(SIGN_UPDATE), "--ed-key-file", "-", str(zip_path)],
+            command,
             input=private_key,
             check=True,
             text=True,
             capture_output=True,
+            timeout=120 if args.allow_keychain else 45,
         )
-    else:
-        signed = subprocess.run(
-            [str(SIGN_UPDATE), "--account", SPARKLE_ACCOUNT, str(zip_path)],
-            check=True,
-            text=True,
-            capture_output=True,
-        )
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        print("Release signing failed or timed out. Existing appcast was not changed.", file=sys.stderr)
+        return 1
     signature, length = parse_signature(signed.stdout)
 
     version = args.version.removeprefix("v")

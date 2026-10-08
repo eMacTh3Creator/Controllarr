@@ -34,6 +34,8 @@ let engine = TorrentEngine(
 
 Task {
     do {
+        await engine.setListenInterfaces("0.0.0.0:6881,[::]:6881")
+        await engine.setNetworkPaused(false)
         if target.hasPrefix("magnet:") {
             print("[Controllarr PoC] adding magnet")
             _ = try await engine.addMagnet(target)

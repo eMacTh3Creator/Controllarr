@@ -1309,6 +1309,11 @@ function SettingsTab({
                 onChange={(event) => patch({ webUIUsername: event.target.value })}
               />
             </label>
+            <label className="toggle-field">
+              <span>Advertise to iOS on the LAN (restart required)</span>
+              <input type="checkbox" checked={settings.remoteDiscoveryEnabled}
+                onChange={(event) => patch({ remoteDiscoveryEnabled: event.currentTarget.checked })} />
+            </label>
             <label className="field">
               <span>Password</span>
               <input
@@ -2874,6 +2879,7 @@ function CategoryModal({
   const [savePath, setSavePath] = useState(initialCategory?.savePath ?? defaultSavePath)
   const [completePath, setCompletePath] = useState(initialCategory?.completePath ?? '')
   const [extractArchives, setExtractArchives] = useState(initialCategory?.extractArchives ?? false)
+  const [createTorrentSubfolder, setCreateTorrentSubfolder] = useState(initialCategory ? initialCategory.createTorrentSubfolder ?? false : true)
   const [blockedExtensions, setBlockedExtensions] = useState(
     initialCategory?.blockedExtensions.join(', ') ?? '',
   )
@@ -2905,6 +2911,7 @@ function CategoryModal({
         savePath: trimmedSavePath,
         completePath: completePath.trim() || undefined,
         extractArchives,
+        createTorrentSubfolder,
         blockedExtensions: blockedExtensions
           .split(',')
           .map((entry) => entry.trim())
@@ -2950,6 +2957,11 @@ function CategoryModal({
               checked={extractArchives}
               onChange={(event) => setExtractArchives(event.currentTarget.checked)}
             />
+          </label>
+          <label className="toggle-field">
+            <span>Create a subfolder for each new torrent (no trailing slash needed)</span>
+            <input type="checkbox" checked={createTorrentSubfolder}
+              onChange={(event) => setCreateTorrentSubfolder(event.currentTarget.checked)} />
           </label>
           <label className="field wide">
             <span>Blocked extensions (comma separated)</span>

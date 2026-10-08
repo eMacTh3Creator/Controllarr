@@ -125,7 +125,7 @@ let package = Package(
         // MARK: - Tests
         .testTarget(
             name: "ControllarrTests",
-            dependencies: ["Persistence", "Services", "TorrentEngine", "LibtorrentShim"],
+            dependencies: ["Persistence", "Services", "TorrentEngine", "LibtorrentShim", "HTTPServer"],
             path: "Tests/ControllarrTests"
         ),
     ],

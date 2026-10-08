@@ -37,6 +37,7 @@ export type Category = {
   savePath: string
   completePath?: string
   extractArchives: boolean
+  createTorrentSubfolder: boolean
   blockedExtensions: string[]
   maxRatio?: number | null
   maxSeedingTimeMinutes?: number | null
@@ -149,6 +150,7 @@ export type Settings = {
   stallThresholdMinutes: number
   defaultSavePath: string
   webUIHost: string
+  remoteDiscoveryEnabled: boolean
   webUIPort: number
   webUIUsername: string
   webUIPassword?: string
@@ -368,6 +370,7 @@ export const api = {
       minimumSeedTimeMinutes: response.minimumSeedTimeMinutes ?? 60,
       healthStallMinutes: response.healthStallMinutes ?? 30,
       healthReannounceOnStall: response.healthReannounceOnStall ?? true,
+      remoteDiscoveryEnabled: response.remoteDiscoveryEnabled ?? true,
       recoveryRules: response.recoveryRules ?? [],
       bandwidthSchedule: response.bandwidthSchedule ?? [],
       vpnEnabled: response.vpnEnabled ?? false,

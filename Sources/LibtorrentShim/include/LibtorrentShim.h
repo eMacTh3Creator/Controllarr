@@ -28,6 +28,9 @@ typedef NS_ENUM(NSInteger, CTRLTorrentState) {
 @property (nonatomic, readonly, copy) NSString *name;
 @property (nonatomic, readonly, copy) NSString *infoHash;
 @property (nonatomic, readonly, copy) NSString *savePath;
+@property (nonatomic, readonly, copy) NSString *contentPath;
+@property (nonatomic, readonly, copy) NSString *errorMessage;
+@property (nonatomic, readonly) BOOL hasMetadata;
 @property (nonatomic, readonly)       float      progress;      // 0.0 – 1.0
 @property (nonatomic, readonly)       CTRLTorrentState state;
 @property (nonatomic, readonly)       BOOL       paused;
@@ -291,6 +294,7 @@ typedef NS_ENUM(NSInteger, CTRLTorrentState) {
 - (void)loadResumeDataFrom:(NSString *)directory;
 
 - (void)shutdown;
+- (void)setSessionPaused:(BOOL)paused;
 
 @end
 

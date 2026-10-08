@@ -97,6 +97,7 @@ public enum QBittorrentAPI {
                 await services.store.setWebUIPassword(pwd)
             }
             await services.store.updateSettings { s in
+                if let value = dict["remoteDiscoveryEnabled"] as? Bool { s.remoteDiscoveryEnabled = value }
                 if let save = dict["save_path"] as? String { s.defaultSavePath = save }
                 if let user = dict["web_ui_username"] as? String { s.webUIUsername = user }
                 if let port = dict["listen_port"] as? Int,
@@ -190,6 +191,7 @@ public enum QBittorrentAPI {
             var category: String? = nil
             var savePath: String? = nil
             var paused: Bool = false
+            var createSubfolder: Bool?
             var torrentFileBlobs: [(filename: String, data: Data)] = []
 
             if contentType.contains("multipart/form-data") {
@@ -206,6 +208,8 @@ public enum QBittorrentAPI {
                     case "savepath":  savePath = String(decoding: p.body, as: UTF8.self)
                     case "paused":
                         paused = String(decoding: p.body, as: UTF8.self).lowercased() == "true"
+                    case "contentLayout":
+                        createSubfolder = Self.contentLayout(String(decoding: p.body, as: UTF8.self))
                     case "torrents":
                         torrentFileBlobs.append((p.filename ?? "upload.torrent", Data(p.body)))
                     default: break
@@ -221,6 +225,7 @@ public enum QBittorrentAPI {
                 category = form["category"]
                 savePath = form["savepath"]
                 paused = (form["paused"]?.lowercased() == "true")
+                createSubfolder = Self.contentLayout(form["contentLayout"] ?? "")
             }
 
             // Normalize empty savepath to nil.
@@ -248,7 +253,8 @@ public enum QBittorrentAPI {
                         category: category,
                         explicitSavePath: explicitPath,
                         policy: mode,
-                        interactive: false
+                        interactive: false,
+                        createSubfolder: createSubfolder
                     )
                     let h = result.infoHash
                     // Always emit the hash so the caller can reference
@@ -275,7 +281,8 @@ public enum QBittorrentAPI {
                         category: category,
                         explicitSavePath: explicitPath,
                         policy: mode,
-                        interactive: false
+                        interactive: false,
+                        createSubfolder: createSubfolder
                     )
                     let h = result.infoHash
                     if !h.isEmpty { addedHashes.append(h) }
@@ -329,8 +336,9 @@ public enum QBittorrentAPI {
         router.post("/api/v2/torrents/delete") { request, _ -> Response in
             let form = FormParser.parse(try await request.body.collect(upTo: 64 * 1024))
             let deleteFiles = (form["deleteFiles"]?.lowercased() == "true")
-            for h in hashList(from: form["hashes"]) {
-                _ = await services.engine.remove(infoHash: h, deleteFiles: deleteFiles)
+            let hashes = hashList(from: form["hashes"])
+            _ = await services.engine.remove(hashes: hashes, deleteFiles: deleteFiles)
+            for h in hashes {
                 await services.store.noteCategoryForHash(h, category: nil)
             }
             return plainText("")
@@ -593,7 +601,8 @@ public enum QBittorrentAPI {
                 extractArchives: (dict["extractArchives"] as? Bool) ?? false,
                 blockedExtensions: (dict["blockedExtensions"] as? [String]) ?? [],
                 maxRatio: dict["maxRatio"] as? Double,
-                maxSeedingTimeMinutes: dict["maxSeedingTimeMinutes"] as? Int
+                maxSeedingTimeMinutes: dict["maxSeedingTimeMinutes"] as? Int,
+                createTorrentSubfolder: (dict["createTorrentSubfolder"] as? Bool) ?? true
             )
             await services.store.upsertCategory(category)
             await services.engine.registerBlockedExtensions(
@@ -635,7 +644,21 @@ public enum QBittorrentAPI {
                 }
                 return UInt16(exactly: v)
             }()
+            for key in ["listenPortRangeStart", "listenPortRangeEnd", "webUIPort", "preferredListenPort"] {
+                if let value = dict[key], !(value is NSNull) {
+                    guard let number = value as? Int, (1...65535).contains(number) else { return Response(status: .badRequest) }
+                }
+            }
+            for key in ["stallThresholdMinutes", "healthStallMinutes", "vpnMonitorIntervalSeconds"] {
+                if let number = dict[key] as? Int, !(1...10080).contains(number) { return Response(status: .badRequest) }
+            }
+            if let limits = dict["connectionLimits"] as? [String: Any] {
+                for value in limits.values where !(value is NSNull) {
+                    guard let number = value as? Int, (0...1000000).contains(number) else { return Response(status: .badRequest) }
+                }
+            }
             await services.store.updateSettings { s in
+                if let value = dict["remoteDiscoveryEnabled"] as? Bool { s.remoteDiscoveryEnabled = value }
                 if let v = dict["listenPortRangeStart"] as? Int { s.listenPortRangeStart = UInt16(v) }
                 if let v = dict["listenPortRangeEnd"]   as? Int { s.listenPortRangeEnd   = UInt16(v) }
                 if dict.keys.contains("preferredListenPort") {
@@ -727,6 +750,14 @@ public enum QBittorrentAPI {
                     }
                 }
             }
+            let updated = await services.store.settings()
+            await services.engine.setPeerDiscovery(dht: updated.peerDiscovery.dhtEnabled, pex: updated.peerDiscovery.pexEnabled, lsd: updated.peerDiscovery.lsdEnabled)
+            await services.engine.setConnectionLimits(globalConnections: updated.connectionLimits.globalMaxConnections,
+                perTorrentConnections: updated.connectionLimits.maxConnectionsPerTorrent, globalUploads: updated.connectionLimits.globalMaxUploads,
+                perTorrentUploads: updated.connectionLimits.maxUploadsPerTorrent)
+            await services.engine.applyQueueing(enabled: updated.torrentQueueing.enabled, activeDownloads: updated.torrentQueueing.activeDownloads,
+                activeSeeds: updated.torrentQueueing.activeSeeds, activeLimit: updated.torrentQueueing.activeLimit)
+            await services.vpnMonitor.forceEvaluate()
             if let preferredPort = preferredPortToApply {
                 await services.engine.setListenPort(preferredPort)
                 await services.engine.forceReannounceAll()
@@ -1010,9 +1041,18 @@ public enum QBittorrentAPI {
 
     // MARK: - Serialization helpers
 
+    static func contentLayout(_ value: String) -> Bool? {
+        switch value.lowercased() {
+        case "subfolder": return true
+        case "nosubfolder": return false
+        default: return nil
+        }
+    }
+
     static func categoryDict(_ c: Persistence.Category) -> [String: Any] {
         var dict: [String: Any] = [
             "name": c.name,
+            "createTorrentSubfolder": c.createTorrentSubfolder,
             "savePath": c.savePath,
             "extractArchives": c.extractArchives,
             "blockedExtensions": c.blockedExtensions,
@@ -1030,6 +1070,7 @@ public enum QBittorrentAPI {
             "stallThresholdMinutes": s.stallThresholdMinutes,
             "defaultSavePath": s.defaultSavePath,
             "webUIHost": s.webUIHost,
+            "remoteDiscoveryEnabled": s.remoteDiscoveryEnabled,
             "webUIPort": s.webUIPort,
             "webUIUsername": s.webUIUsername,
             "seedLimitAction": s.seedLimitAction.rawValue,

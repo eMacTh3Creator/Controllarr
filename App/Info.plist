@@ -30,8 +30,14 @@
 	<string>15.0</string>
 	<key>LSUIElement</key>
 	<false/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_controllarr._tcp</string>
+	</array>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Everett Jenkins. MIT Licensed.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Advertise Controllarr to remote managers and serve your local network.</string>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSSupportsSuddenTermination</key>

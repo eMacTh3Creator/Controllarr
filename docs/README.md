@@ -4,6 +4,12 @@ This folder holds the higher-level product and planning docs that sit alongside 
 
 ## Start Here
 
+- [MOBILE.md](MOBILE.md) - native iOS preview, LAN/hostname setup and notification delivery limits
+- [REMOTE_API.md](REMOTE_API.md) - authenticated cross-platform Remote Protocol 1
+- [PARITY.md](PARITY.md) - shipped platform coverage and remaining advanced-client differences
+- [../iOS/README.md](../iOS/README.md) - iOS build, signing and distribution requirements
+- [RELEASING.md](RELEASING.md) - Developer ID notarization, Sparkle signing and Apple distribution workflow
+
 - [../README.md](../README.md) — product overview, feature summary, install/build instructions
 - [index.html](index.html) — public GitHub Pages launch page for Controllarr
 - [OPERATIONS.md](OPERATIONS.md) — headless daemon usage, backup/export/restore, recovery rules, post-processing retries, disk-space operations, and network diagnostics
@@ -11,6 +17,8 @@ This folder holds the higher-level product and planning docs that sit alongside 
 - [V1_5_ROADMAP.md](V1_5_ROADMAP.md) — big-ticket roadmap for a more ambitious v1.5 release
 
 ## Release Notes
+
+- [../RELEASE_NOTES_v2.3.0.md](../RELEASE_NOTES_v2.3.0.md) - stability hardening, import paths and mobile remote support
 
 - [../RELEASE_NOTES_v2.1.9.md](../RELEASE_NOTES_v2.1.9.md) — automatic conservative resolver protection for 650+ torrent sessions
 - [../RELEASE_NOTES_v2.1.8.md](../RELEASE_NOTES_v2.1.8.md) — removes remote-login Keychain prompts for WebUI and *arr credentials

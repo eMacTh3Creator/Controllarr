@@ -22,6 +22,7 @@ struct QBTorrentInfo {
     let upspeed: Int64
     let state: String
     let savePath: String
+    var contentPath: String = ""
     let category: String
     let addedOn: Int64
     let completed: Int64
@@ -31,7 +32,7 @@ struct QBTorrentInfo {
     let eta: Int
 
     static func from(_ t: TorrentStats, categoryOverlay: [String: String]) -> QBTorrentInfo {
-        QBTorrentInfo(
+        var result = QBTorrentInfo(
             hash: t.infoHash,
             name: t.name,
             size: t.totalWanted,
@@ -39,7 +40,7 @@ struct QBTorrentInfo {
             dlspeed: t.downloadRate,
             upspeed: t.uploadRate,
             state: mapState(t),
-            savePath: t.savePath,
+            savePath: t.apiSavePath.isEmpty ? t.savePath : t.apiSavePath,
             category: t.category ?? categoryOverlay[t.infoHash] ?? "",
             addedOn: Int64(t.addedDate.timeIntervalSince1970),
             completed: t.totalDone,
@@ -48,13 +49,16 @@ struct QBTorrentInfo {
             numLeechs: t.numPeers,
             eta: t.etaSeconds
         )
+        result.contentPath = t.contentPath
+        return result
     }
 
     static func mapState(_ t: TorrentStats) -> String {
+        if !t.errorMessage.isEmpty { return "error" }
         // qBittorrent canonical states that Sonarr/Radarr actually look
         // for: pausedDL, pausedUP, downloading, metaDL, uploading/stalledUP,
         // queuedDL, queuedUP, checkingDL, checkingUP, error, missingFiles.
-        if t.paused { return t.totalDone >= t.totalWanted ? "pausedUP" : "pausedDL" }
+        if t.paused { return t.hasMetadata && t.progress >= 1 ? "pausedUP" : "pausedDL" }
         switch t.state {
         case .downloading:          return t.downloadRate > 0 ? "downloading" : "stalledDL"
         case .downloadingMetadata:  return "metaDL"
@@ -76,6 +80,7 @@ struct QBTorrentInfo {
             "upspeed":       upspeed,
             "state":         state,
             "save_path":     savePath,
+            "content_path":  contentPath,
             "category":      category,
             "added_on":      addedOn,
             "completed":     completed,
@@ -110,7 +115,7 @@ struct QBTorrentProperties {
 
     static func from(_ t: TorrentStats) -> QBTorrentProperties {
         QBTorrentProperties(
-            savePath: t.savePath,
+            savePath: t.apiSavePath.isEmpty ? t.savePath : t.apiSavePath,
             totalSize: t.totalWanted,
             totalDownloaded: t.totalDownload,
             totalUploaded: t.totalUpload,
