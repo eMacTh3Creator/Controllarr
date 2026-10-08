@@ -61,5 +61,7 @@ Source and a simulator app are published as developer previews. A simulator ZIP
 cannot be installed on a physical iPhone. Device build 1.0.0 (2) was delivered
 through Apple Transporter on October 8, 2026 using release Xcode, valid Apple
 Distribution signing and the matching provisioning profile. Apple processing
-and testing-group availability are pending; this is not yet a public TestFlight
-release. See [iOS build guide](../iOS/README.md).
+completed, and the build is active in the publisher's internal TestFlight group.
+Invited internal testers install using Apple's TestFlight app, not the simulator
+ZIP. Public beta access still requires external-testing setup and Apple beta
+review; this is not yet a public TestFlight release. See [iOS build guide](../iOS/README.md).

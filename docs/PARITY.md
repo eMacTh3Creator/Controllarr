@@ -16,7 +16,7 @@ Mac uses libtorrent, Windows uses MonoTorrent, and iOS is a remote client only.
 | Per-torrent speed/connection/sequential/queue ordering | Not full Windows parity | Yes | Not exposed in preview |
 | RSS, watch folders, migration and torrent creation | Not full Windows parity | Yes | Not in preview |
 | SOCKS5 and IP blocklists | Not full Windows parity | Yes | Server fields where supported |
-| Automatic updates | Notarized app + signed Sparkle feed | Release checks; automatic installation planned | TestFlight publication pending |
+| Automatic updates | Notarized app + signed Sparkle feed | Release checks; automatic installation planned | Internal TestFlight active; public beta pending |
 | Reliable suspended-app notifications | APNs provider not included | APNs provider not included | Best-effort refresh only |
 
 ## Reliability Boundaries
@@ -34,6 +34,7 @@ or real Plexbox soak is implied. See the Windows validation report.
 
 iOS has simulator compilation/launch and host protocol tests. The local Xcode
 simulator XCTest runner failed to attach to its device service, so host tests
-are not represented as successful iPhone XCTest execution. An Apple Distribution
-signed archive and App Store Connect record are prepared. Physical-device testing,
-accepted TestFlight/App Store publication and APNs push remain.
+are not represented as successful iPhone XCTest execution. Apple Distribution-signed
+device build 1.0.0 (2) passed Transporter validation, completed Apple processing
+and is active for internal TestFlight testing. Physical-device testing,
+public TestFlight/App Store publication and APNs push remain.

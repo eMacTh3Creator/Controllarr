@@ -20,12 +20,20 @@ the build host; this is not live-transfer throughput or a soak test. Isolated
 authenticated API smoke passed. iOS simulator build/launch and six host protocol
 tests passed; simulator XCTest execution was blocked by Xcode device-service
 attachment failure. No cause of the reported whole-Mac reboot is established
-without panic/watchdog logs. Full advanced Windows parity and APNs/TestFlight
+without panic/watchdog logs. Full advanced Windows parity, APNs and public TestFlight
 distribution remain documented in [PARITY.md](docs/PARITY.md).
 
 The Sparkle feed uses the existing publisher key. Its Ed25519 signature and exact
 archive length were independently verified against the embedded public key.
 Installed apps do not access the publisher's private signing key.
+
+### iOS Distribution Follow-up
+
+Device build 1.0.0 (2) passed Transporter validation and Apple processing and is
+active in internal TestFlight testing. This build adds the required iPad
+multitasking orientations, an opaque full-bleed icon and local bundle preflight
+checks, and uses release Xcode instead of an unsupported beta SDK. Public beta
+access and reliable APNs push remain separate unfinished work.
 
 ## Install
 

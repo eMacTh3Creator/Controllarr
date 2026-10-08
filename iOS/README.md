@@ -27,8 +27,8 @@ build cannot run on an iPhone. The publisher has created valid Apple certificate
 the explicit App ID, an App Store provisioning profile and the App Store Connect
 record. The distribution-signed archive passes signature validation with
 `get-task-allow=false`. Corrected device build 1.0.0 (2) was delivered through
-Apple Transporter on October 8, 2026 and is awaiting processing/testing-group
-availability. Public TestFlight access is not available yet; do not treat the
+Apple Transporter on October 8, 2026, processed by Apple and enabled in the
+publisher's internal TestFlight testing group. Public TestFlight access is not available yet; do not treat the
 simulator download as a phone installer.
 
 Publisher upload options are in `ExportOptions-AppStore.plist`; other developers
