@@ -6,8 +6,8 @@ let package = Package(
     platforms: [.macOS(.v15), .iOS(.v17)],
     targets: [
         .target(name: "ControllarrRemoteProtocol", path: "Sources",
-                exclude: ["ControllarrRemoteApp.swift", "Discovery.swift", "RemoteModel.swift", "Views.swift"],
-                sources: ["RemoteAPI.swift"]),
+                exclude: ["ControllarrRemoteApp.swift", "Discovery.swift", "RemoteModel.swift", "Views.swift", "AdaptiveViews.swift", "PlatformViews.swift", "LayoutPreview.swift", "Assets.xcassets"],
+                sources: ["RemoteAPI.swift", "Workspace.swift"]),
         .testTarget(name: "RemoteProtocolTests", dependencies: ["ControllarrRemoteProtocol"], path: "Tests")
     ]
 )

@@ -27,6 +27,6 @@ final class Discovery: NSObject, @preconcurrency NetServiceBrowserDelegate, @pre
         message = "Select a server to sign in. Discovery never bypasses authentication."
     }
     func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
-        message = "Discovery is unavailable. Allow Local Network access in iOS Settings, or enter a hostname manually."
+        message = "Discovery is unavailable. Allow Local Network access in system Settings, or enter a hostname manually."
     }
 }

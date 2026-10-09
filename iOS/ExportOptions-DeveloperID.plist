@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key><string>developer-id</string>
+    <key>destination</key><string>upload</string>
+    <key>signingStyle</key><string>manual</string>
+    <key>signingCertificate</key><string>Developer ID Application</string>
+    <key>teamID</key><string>TS7Y9PMXV4</string>
+    <key>provisioningProfiles</key>
+    <dict>
+        <key>com.controllarr.remote.mac</key>
+        <string>Controllarr Remote Mac Developer ID</string>
+    </dict>
+</dict>
+</plist>

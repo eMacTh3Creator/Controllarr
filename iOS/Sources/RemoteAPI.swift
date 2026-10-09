@@ -65,7 +65,7 @@ enum RemoteError: LocalizedError {
         case .http(let status, let message): return "Server returned \(status): \(message.prefix(180))"
         case .authentication: return "Sign-in failed. Check your WebUI username and password."
         case .unsupportedServer: return "Update this Controllarr server to a release with Remote Protocol 1 support."
-        case .credentialStorage: return "iOS could not store the password securely. Unlock this device and try again."
+        case .credentialStorage: return "Could not store the password securely. Unlock this device and try again."
         }
     }
 }
@@ -94,8 +94,12 @@ enum ServerAddress {
 
 enum CredentialStore {
     private static func query(_ id: UUID) -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "com.controllarr.remote",
+        var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "com.controllarr.remote",
          kSecAttrAccount as String: id.uuidString]
+        #if os(macOS)
+        query[kSecUseDataProtectionKeychain as String] = true
+        #endif
+        return query
     }
     static func save(_ password: String, for id: UUID) throws {
         let q = query(id)
@@ -197,7 +201,7 @@ actor RemoteClient {
     func close() { session.invalidateAndCancel(); cookie = nil; password = "" }
 }
 
-struct RemoteTorrent: Decodable, Identifiable, Sendable {
+struct RemoteTorrent: Decodable, Identifiable, Hashable, Sendable {
     var id: String { hash }
     let hash: String
     let name: String

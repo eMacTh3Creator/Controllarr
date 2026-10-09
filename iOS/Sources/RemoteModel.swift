@@ -1,7 +1,9 @@
 import Foundation
 import Observation
 import UserNotifications
+#if os(iOS)
 import BackgroundTasks
+#endif
 
 @MainActor @Observable
 final class RemoteModel {
@@ -13,6 +15,7 @@ final class RemoteModel {
     var total = 0
     var offset = 0
     var search = ""
+    private(set) var appliedSearch = ""
     var category: String?
     var categories: [JSONValue] = []
     var session: JSONValue = .object([:])
@@ -20,13 +23,21 @@ final class RemoteModel {
     var error: String?
     var connected = false
     var busy = false
+    var lastUpdated: Date?
     var notificationKinds: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "notificationKinds") ?? [])
-    private var refreshing = false
+    private(set) var refreshing = false
     private var generation = UUID()
     private var pollTask: Task<Void, Never>?
     private var active = false
+    private var refreshPending = false
+    #if DEBUG
+    private let layoutPreview = ProcessInfo.processInfo.arguments.contains("--layout-preview")
+    #endif
 
     init() {
+        #if DEBUG
+        if layoutPreview { loadLayoutPreview(); return }
+        #endif
         if let data = UserDefaults.standard.data(forKey: "instances"), let saved = try? JSONDecoder().decode([Instance].self, from: data) { instances = saved }
         selectedID = UserDefaults.standard.string(forKey: "selectedID").flatMap(UUID.init(uuidString:)) ?? instances.first?.id
     }
@@ -66,7 +77,7 @@ final class RemoteModel {
         await client?.close()
         client = nil
         connected = false
-        torrents = []; categories = []; events = []; session = .object([:]); offset = 0
+        torrents = []; categories = []; events = []; session = .object([:]); offset = 0; total = 0; lastUpdated = nil
         guard let instance = selected else { return }
         guard let password = CredentialStore.load(instance.id) else { error = "Enter this server's password again in Instances."; return }
         do {
@@ -83,10 +94,19 @@ final class RemoteModel {
         } catch { if token == generation { self.error = error.localizedDescription } }
     }
     func setActive(_ value: Bool) {
+        #if DEBUG
+        if layoutPreview { return }
+        #endif
+        #if os(macOS)
+        guard !active else { return }
+        active = true
+        if client == nil { Task { await connect() } } else { startPolling() }
+        #else
         active = value
         if value {
             if client == nil { Task { await connect() } } else { startPolling() }
         } else { pollTask?.cancel(); pollTask = nil; scheduleBackground() }
+        #endif
     }
     private func startPolling() {
         pollTask?.cancel()
@@ -99,25 +119,39 @@ final class RemoteModel {
         }
     }
     func refresh() async {
-        guard let client, !refreshing else { return }
+        guard let client else { return }
+        guard !refreshing else { refreshPending = true; return }
         refreshing = true
         let token = generation
-        defer { refreshing = false }
+        let request = RemotePageRequest(offset: offset, search: search, category: category)
+        defer {
+            refreshing = false
+            if refreshPending {
+                refreshPending = false
+                Task { await refresh() }
+            }
+        }
         do {
-            var query = ["offset": String(offset), "limit": "100", "search": search]
-            if let category { query["category"] = category }
-            let page = try JSONDecoder().decode(TorrentPage.self, from: await client.request("api/controllarr/remote/torrents", query: query))
+            let page = try JSONDecoder().decode(TorrentPage.self, from: await client.request("api/controllarr/remote/torrents", query: request.query))
             let cats = try await client.json("api/controllarr/categories")
             let stats = try await client.json("api/controllarr/stats")
             guard token == generation else { return }
-            torrents = page.items; total = page.total; categories = cats.array; session = stats
-            if offset >= total && offset > 0 { offset = max(0, ((total - 1) / 100) * 100) }
+            guard request == RemotePageRequest(offset: offset, search: search, category: category) else {
+                refreshPending = true
+                return
+            }
+            if torrents != page.items { torrents = page.items }
+            if total != page.total { total = page.total }
+            if categories != cats.array { categories = cats.array }
+            if session != stats { session = stats }
+            if offset >= total && offset > 0 { offset = RemotePageRequest.lastOffset(total: total); refreshPending = true }
             try await pollEvents(client)
-            connected = true; error = nil
+            guard token == generation else { return }
+            connected = true; error = nil; lastUpdated = Date()
         } catch is CancellationError { }
         catch { if token == generation { connected = false; self.error = error.localizedDescription } }
     }
-    func changeFilter() async { offset = 0; await refresh() }
+    func changeFilter() async { appliedSearch = search; offset = 0; await refresh() }
     func action(_ name: String, hashes: Set<String>, extra: [String: String] = [:]) async {
         guard let client, !hashes.isEmpty, !busy else { return }
         busy = true
@@ -167,7 +201,7 @@ final class RemoteModel {
     func setNotifications(_ kind: String, enabled: Bool) async {
         if enabled {
             do {
-                guard try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) else { error = "Enable notifications for Controllarr in iOS Settings."; return }
+                guard try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) else { error = "Enable notifications for Controllarr Remote in system Settings."; return }
                 notificationKinds.insert(kind)
             } catch { self.error = error.localizedDescription }
         } else { notificationKinds.remove(kind) }
@@ -175,7 +209,8 @@ final class RemoteModel {
         scheduleBackground()
     }
     private func pollEvents(_ client: RemoteClient) async throws {
-        let instance = await client.instance
+        let token = generation
+        let instance = client.instance
         let defaults = UserDefaults.standard
         let prefix = "events." + instance.id.uuidString
         var query: [String: String] = [:]
@@ -183,6 +218,7 @@ final class RemoteModel {
             query = ["epoch": epoch, "cursor": String(defaults.integer(forKey: prefix + ".cursor"))]
         }
         let page = try JSONDecoder().decode(EventPage.self, from: await client.request("api/controllarr/remote/events", query: query))
+        guard token == generation, instance.id == selectedID, !Task.isCancelled else { return }
         if !page.reset {
             events = Array((Array(page.events.reversed()) + events).prefix(100))
             for event in page.events.suffix(20) where notificationKinds.contains(event.kind) && Date().timeIntervalSince1970 - event.timestamp < 3600 {
@@ -197,10 +233,12 @@ final class RemoteModel {
         defaults.set(page.cursor, forKey: prefix + ".cursor")
     }
     func scheduleBackground() {
+        #if os(iOS)
         guard !notificationKinds.isEmpty else { BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: "com.controllarr.remote.refresh"); return }
         let request = BGAppRefreshTaskRequest(identifier: "com.controllarr.remote.refresh")
         request.earliestBeginDate = Date().addingTimeInterval(15 * 60)
         try? BGTaskScheduler.shared.submit(request)
+        #endif
     }
     func backgroundRefresh() async {
         guard !notificationKinds.isEmpty else { return }

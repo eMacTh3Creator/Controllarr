@@ -4,10 +4,11 @@ This folder holds the higher-level product and planning docs that sit alongside 
 
 ## Start Here
 
-- [MOBILE.md](MOBILE.md) - native iOS preview, LAN/hostname setup and notification delivery limits
+- [MOBILE.md](MOBILE.md) - native iPhone/iPad/Mac remote, LAN/hostname setup and notification delivery limits
+- [REMOTE_VALIDATION_1.1.0.md](REMOTE_VALIDATION_1.1.0.md) - universal remote release checks and remaining test coverage
 - [REMOTE_API.md](REMOTE_API.md) - authenticated cross-platform Remote Protocol 1
 - [PARITY.md](PARITY.md) - shipped platform coverage and remaining advanced-client differences
-- [../iOS/README.md](../iOS/README.md) - iOS build, signing and distribution requirements
+- [../iOS/README.md](../iOS/README.md) - shared Apple remote builds, signing and installation
 - [RELEASING.md](RELEASING.md) - Developer ID notarization, Sparkle signing and Apple distribution workflow
 
 - [../README.md](../README.md) — product overview, feature summary, install/build instructions
@@ -18,6 +19,7 @@ This folder holds the higher-level product and planning docs that sit alongside 
 
 ## Release Notes
 
+- [../RELEASE_NOTES_remote-v1.1.0.md](../RELEASE_NOTES_remote-v1.1.0.md) - adaptive native remote for iPhone, iPad and Mac
 - [../RELEASE_NOTES_v2.3.0.md](../RELEASE_NOTES_v2.3.0.md) - stability hardening, import paths and mobile remote support
 
 - [../RELEASE_NOTES_v2.1.9.md](../RELEASE_NOTES_v2.1.9.md) — automatic conservative resolver protection for 650+ torrent sessions

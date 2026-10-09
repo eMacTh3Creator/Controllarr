@@ -82,3 +82,34 @@ a public iPhone installation method. Only advertise a TestFlight link after
 Apple accepts/processes the build and the beta group is actually available.
 Public testing may require beta review. Physical-device and notification-delivery
 checks remain separate from signing validation.
+
+## Native Mac Remote
+
+The shared remote source also has scheme `ControllarrRemoteMac`, product
+`ControllarrRemote.app`, and bundle `com.controllarr.remote.mac`. It is a
+sandboxed remote client, not the Mac torrent server. Build both `arm64` and
+`x86_64` with `ONLY_ACTIVE_ARCH=NO`, Developer ID Application signing, and the
+checked-in `iOS/Mac/ControllarrRemote.entitlements`. Do not use the torrent
+server's broader entitlements or Sparkle appcast for this separate product.
+
+The Mac data-protection Keychain requires an explicit App ID and a Developer ID
+provisioning profile authorizing `com.apple.application-identifier`, team ID,
+and `keychain-access-groups`. Signing without that embedded profile is not
+sufficient. Use the existing `Controllarr Remote Mac Developer ID` profile
+with manual signing and `-allowProvisioningUpdates`; other publishers must
+substitute their own team, App ID and profile. Verify the archive contains
+`Contents/embedded.provisionprofile` and the expanded app-specific Keychain group.
+Do not commit the profile or export private keys.
+
+Archive from the `iOS` directory, submit with `iOS/ExportOptions-DeveloperID.plist`,
+wait for Apple acceptance, export the notarized app, and validate signature,
+stapled ticket, Gatekeeper, and `lipo -archs` before packaging. Publish a separate
+Remote release/tag so the server's automatic updater cannot install this client
+over the engine app. Use a tag such as `remote-v1.1.0` and publish with
+`gh release create --latest=false` so the server remains the latest desktop
+release. Mac Remote does not yet include an automatic updater.
+
+Before distribution, check a wide and narrow window, inspector visibility,
+selection across resize, category/settings sheets, keyboard/context menus, LAN
+discovery, and optional notifications. The disconnected Debug `--layout-preview`
+fixture is for UI checks only; it must not appear in Release app behavior.

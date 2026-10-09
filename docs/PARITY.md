@@ -1,11 +1,15 @@
 # Platform Coverage and Remaining Work
 
 v2.3.0 aligns common management workflows, not every engine-specific control.
-Mac uses libtorrent, Windows uses MonoTorrent, and iOS is a remote client only.
+Mac uses libtorrent, Windows uses MonoTorrent, and Controllarr Remote is a remote
+client only. Remote now shares adaptive SwiftUI views across iPhone, iPad, and a
+separate native Mac target (Apple Silicon and Intel). It does not add engine
+features to the Mac server or imply full Windows engine parity.
 
-| Feature | macOS | Windows | iOS preview |
+| Feature | macOS server | Windows server | Remote (iPhone/iPad/Mac) |
 | --- | --- | --- | --- |
 | Native desktop/mobile UI | SwiftUI | WPF | SwiftUI |
+| Adaptive remote sidebar/table/inspector | N/A | N/A | Yes; compact tabs/rows and accessibility fallback |
 | Magnet/file intake, categories, bulk pause/remove | Yes | Yes | Yes, selected page |
 | Confirmed disk deletion and folder repair | Yes | Yes | Yes, server-side |
 | Per-category subfolders / *arr content paths | Yes | Yes | Server settings |
@@ -35,6 +39,12 @@ or real Plexbox soak is implied. See the Windows validation report.
 iOS has simulator compilation/launch and host protocol tests. The local Xcode
 simulator XCTest runner failed to attach to its device service, so host tests
 are not represented as successful iPhone XCTest execution. Apple Distribution-signed
-device build 1.0.0 (2) passed Transporter validation, completed Apple processing
-and is active for internal TestFlight testing. Physical-device testing,
-public TestFlight/App Store publication and APNs push remain.
+device build 1.1.0 (3) passed Transporter validation, completed Apple processing
+and is active for internal TestFlight testing. The separate native Mac Remote
+1.1.0 binary includes arm64 and x86_64 slices and passes signature, notarization,
+stapled-ticket, Gatekeeper and disposable private-Keychain checks. Native Mac
+fixture checks covered dashboard, table, inspector and selection across a window
+resize. Ten host tests pass. Simulator compilation and headless launch are not
+visual rotation tests; physical-device rotation, iPad multitasking, Intel runtime,
+public TestFlight/App Store publication and APNs push remain unverified or pending.
+See [Remote validation](REMOTE_VALIDATION_1.1.0.md).
