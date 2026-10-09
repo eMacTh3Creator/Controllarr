@@ -3,7 +3,7 @@
 Native SwiftUI remote manager for macOS and Windows Controllarr v2.3.0+.
 Requires iOS/iPadOS 17+ or macOS 15+, release Xcode, and XcodeGen. No torrent
 engine runs in the remote manager. The existing Mac server app stays separate.
-See [setup and notification limits](../docs/MOBILE.md) and [platform coverage](../docs/PARITY.md).
+See [setup and notifications](../docs/MOBILE.md) and [platform coverage](../docs/PARITY.md).
 
 ## Install
 
@@ -15,9 +15,9 @@ Normal macOS first-launch and local-network permission prompts may still appear.
 Mac Remote currently uses manual downloads for updates.
 
 iPhone/iPad users in the publisher's existing internal TestFlight group can
-install **1.1.0 (3)** through TestFlight. No public invitation link is available.
+install **1.1.0 (3)** through TestFlight. See the remote release notes for distribution details.
 
-## Adaptive Workspace
+## Interface
 
 - iPhone and narrow iPad windows use four tabs and touch-friendly torrent rows.
 - Larger iPad windows and Mac use a sidebar with direct access to operations.
