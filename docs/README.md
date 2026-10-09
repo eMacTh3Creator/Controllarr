@@ -1,13 +1,13 @@
 # Controllarr Docs
 
-This folder holds the higher-level product and planning docs that sit alongside the source tree.
+Setup guides, operating instructions, and release notes for Controllarr.
 
 ## Start Here
 
-- [MOBILE.md](MOBILE.md) - native iPhone/iPad/Mac remote, LAN/hostname setup and notification delivery limits
-- [REMOTE_VALIDATION_1.1.0.md](REMOTE_VALIDATION_1.1.0.md) - universal remote release checks and remaining test coverage
+- [MOBILE.md](MOBILE.md) - native iPhone/iPad/Mac remote, network setup and notifications
+- [REMOTE_VALIDATION_1.1.0.md](REMOTE_VALIDATION_1.1.0.md) - remote app release test results
 - [REMOTE_API.md](REMOTE_API.md) - authenticated cross-platform Remote Protocol 1
-- [PARITY.md](PARITY.md) - shipped platform coverage and remaining advanced-client differences
+- [PARITY.md](PARITY.md) - Mac and Windows feature comparison
 - [../iOS/README.md](../iOS/README.md) - shared Apple remote builds, signing and installation
 - [RELEASING.md](RELEASING.md) - Developer ID notarization, Sparkle signing and Apple distribution workflow
 
@@ -15,7 +15,7 @@ This folder holds the higher-level product and planning docs that sit alongside 
 - [index.html](index.html) — public GitHub Pages launch page for Controllarr
 - [OPERATIONS.md](OPERATIONS.md) — headless daemon usage, backup/export/restore, recovery rules, post-processing retries, disk-space operations, and network diagnostics
 - [PERFORMANCE.md](PERFORMANCE.md) — large-library scaling notes, polling model, and tuning guidance for high torrent counts
-- [V1_5_ROADMAP.md](V1_5_ROADMAP.md) — big-ticket roadmap for a more ambitious v1.5 release
+- [V1_5_ROADMAP.md](V1_5_ROADMAP.md) — historical development roadmap
 
 ## Release Notes
 
