@@ -4,40 +4,38 @@
 
 <h1 align="center">Controllarr</h1>
 
-<p align="center">A Mac-native torrent control center for Sonarr, Radarr, Overseerr, Plex, and always-on media servers.</p>
+<p align="center">A Mac torrent client that connects to Sonarr and Radarr.</p>
 <p align="center">
   <a href="https://emacth3creator.github.io/Controllarr/">Public website</a> ·
   <a href="https://github.com/eMacTh3Creator/Controllarr/releases/latest">Download latest release</a> ·
   <a href="docs/README.md">Documentation</a>
 </p>
 
-Controllarr is a native macOS BitTorrent client powered by [libtorrent-rasterbar](https://www.libtorrent.org/). It gives you a SwiftUI desktop app, a browser-based React WebUI, a menu-bar controller, and qBittorrent Web API compatibility so Sonarr, Radarr, and Overseerr can use it as a drop-in download client.
+Controllarr is a Mac BitTorrent client using [libtorrent-rasterbar](https://www.libtorrent.org/). Manage transfers in the desktop app, from the menu bar, or in a browser. Sonarr and Radarr connect using the qBittorrent download-client type; Overseerr sends requests through those apps.
 
-The project is built around a common media-server pain point: torrent traffic should stay on the VPN, but the WebUI and *arr API should remain reachable from another LAN machine. Controllarr includes VPN interface binding, LAN-aware WebUI settings, network diagnostics, and preferred forwarded-port support for providers such as PIA.
-
-**Current status:** Controllarr is public and usable, with active releases focused on VPN-safe operation, qBittorrent API compatibility, large-library stability, and smoother native/WebUI controls.
+Choose a VPN adapter for torrent traffic while keeping browser and API access available on your LAN. The app includes network diagnostics and forwarded-port settings for providers such as PIA.
 
 **v2.3.0:** bounded resume checkpointing, lower-overhead snapshots, session-level VPN startup/disconnect protection, two-worker archive extraction, category subfolder controls, and corrected Sonarr content paths. Native tables support confirmed pause-first bulk removal, including category selection and the Delete key. Existing storage is not silently reorganized; use **Repair import folder layout** when needed.
 
-**Controllarr Remote 1.1:** the shared native SwiftUI manager now targets iPhone, iPad, and Mac (Apple Silicon and Intel), with compact tabs, an adaptive sidebar, sortable paged torrent tables, multi-select controls, and a detail inspector. Larger displays gain a command grid and side-by-side recent activity; narrow windows and accessibility text use touch-friendly rows. The Mac remote manager is separate from the torrent server. See [Remote build/install status](iOS/README.md), [setup](docs/MOBILE.md), [remote protocol](docs/REMOTE_API.md), and the [platform parity matrix](docs/PARITY.md). Public iOS beta access and reliable APNs push are not available yet; simulator downloads are not phone installers.
+**Controllarr Remote 1.1:** manage torrents from an iPhone, iPad, or Mac. Sort transfers, select several torrents at once, and inspect files. The remote app connects to an existing server; it does not run a torrent engine. See [installation](iOS/README.md), [setup](docs/MOBILE.md), and [remote release notes](RELEASE_NOTES_remote-v1.1.0.md).
 
 [Download Mac Remote 1.1.0 (Apple Silicon + Intel)](https://github.com/eMacTh3Creator/Controllarr/releases/download/remote-v1.1.0/ControllarrRemote-v1.1.0-macOS-universal.zip). Requires macOS 15+. Developer ID signed, notarized and stapled; move `ControllarrRemote.app` to Applications and connect to an existing server. iPhone/iPad build 1.1.0 (3) is available to the existing internal TestFlight group. See [Remote release notes](RELEASE_NOTES_remote-v1.1.0.md).
 
 Windows x64/ARM64 installers live in the [Windows project](https://emacth3creator.github.io/Controllarr-Windows/). The engines and advanced controls are not identical across platforms.
 
-## Why Controllarr?
+## What it does
 
 - Run a Mac mini as a dedicated torrent target for Sonarr, Radarr, Overseerr, and Plex workflows.
 - Keep torrent traffic bound to a VPN adapter while still exposing the WebUI/API to your LAN.
 - Use qBittorrent-compatible endpoints without running qBittorrent itself.
-- Handle big libraries with 700 to 1,000+ torrents more conservatively than a generic desktop torrent UI.
+- Manage larger libraries with limits on background saves and tracker lookups.
 - Manage categories, post-processing, seeding policy, health, recovery, logs, and network diagnostics from one app.
 
 ## Highlights
 
 - **qBittorrent Web API v2 compatibility** for Sonarr, Radarr, Overseerr, and other qBit-aware tools.
 - **Native macOS app** with Torrents, Categories, Settings, Health, Recovery, Post-Processor, Seeding, and Log views.
-- **Modern React WebUI** for browser access from the Mac or another machine on the LAN.
+- **Browser Web UI** for browser access from the Mac or another machine on the LAN.
 - **Automatic listen-port cycling** when a port appears stale or unhealthy.
 - **Preferred forwarded port** for VPN providers such as PIA, with fallback to a configured port range.
 - **VPN kill switch and VPN interface binding** so torrent traffic can stay on the tunnel adapter.
@@ -149,20 +147,9 @@ Recent release line:
 - **v2.1.0:** duplicate detection, force recheck, context menus, multi-select operations, and stronger port-cycle reconnect.
 - **v2.0.0:** peer-discovery toggles, connection limits, WebUI hardening, category-aware file moves, and Settings redesign.
 
-## Roadmap
+## Development plans
 
-The old "Road To v1.5" plan has largely become the current product direction: headless mode, recovery rules, backup/restore, VPN protection, performance tuning, network diagnostics, and deeper WebUI operations have already started landing.
-
-The next major wave should focus on making Controllarr feel less like a torrent client and more like a media-download operations platform:
-
-- **Smarter automation:** richer rule playbooks for stalled torrents, failed imports, tracker problems, post-processing retries, and disk pressure.
-- **Deeper *arr orchestration:** Sonarr/Radarr/Overseerr callbacks, import-readiness checks, re-search policy, approval queues, and category templates per app.
-- **Remote operations:** WebSocket live updates, mobile-friendly dashboards, multi-node management, and better headless deployment workflows.
-- **Reliability and observability:** health scorecards, queue analytics, recovery timelines, metrics, and clearer "why is this stuck?" diagnostics.
-- **Security and administration:** multi-user auth, scoped API tokens, audit logs, trusted-origin controls, and safer remote-exposure defaults.
-- **Extensibility:** webhooks, scripting hooks, public management APIs, and eventually plugin-style integrations.
-
-The longer-form planning document still lives at [docs/V1_5_ROADMAP.md](docs/V1_5_ROADMAP.md), but the README now treats that as historical/product-direction context rather than a pending v1.5 release target.
+See [the roadmap](docs/V1_5_ROADMAP.md) for planned automation, remote management, and administration features.
 
 ## Documentation
 
@@ -242,14 +229,14 @@ Optional flags:
 
 The daemon uses the same persistence format and WebUI/API surface as the app bundle.
 
-## Project Status
+## Running a media server
 
-Controllarr is public and usable, but it is still moving quickly. The safest production posture is:
+A few things to set up before leaving Controllarr running unattended:
 
 - Keep backups of your Controllarr state.
-- Use VPN binding and the kill switch if torrent traffic must never leak.
+- Select your VPN adapter and enable your provider's kill switch.
 - Use the Network Diagnostics panel when exposing the WebUI to another LAN machine.
-- Watch release notes before upgrading a heavily loaded 700+ torrent node.
+- Read the release notes before upgrading.
 
 ### Credential storage
 
