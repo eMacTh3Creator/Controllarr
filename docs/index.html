@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Controllarr is a Mac-native torrent control plane for Sonarr, Radarr, Overseerr, and Plex workflows.">
+  <meta name="description" content="A Mac torrent client with Sonarr and Radarr support, VPN adapter settings, and browser access.">
   <meta name="theme-color" content="#071117">
   <meta property="og:title" content="Controllarr">
   <meta property="og:description" content="Mac-native torrent control for your *arr stack.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="assets/icon-512.png">
-  <title>Controllarr - Mac-native torrent control for your *arr stack</title>
+  <title>Controllarr - Mac torrent client for Sonarr and Radarr</title>
   <link rel="icon" href="assets/icon-256.png">
   <style>
     :root {
@@ -222,8 +222,8 @@
     <section class="hero">
       <div class="shell hero-grid">
         <div>
-          <h1>Mac-native torrent control for your <span class="arr">*arr</span> stack.</h1>
-          <p class="lead">Controllarr is a native macOS BitTorrent client and qBittorrent-compatible API target built for Sonarr, Radarr, Overseerr, Plex, and operators who want a Mac mini to behave like a proper media-download node.</p>
+          <h1>A Mac torrent client for Sonarr and Radarr.</h1>
+          <p class="lead">Download and manage torrents on your Mac, or connect Sonarr and Radarr to handle downloads for you. Manage transfers in the Mac app or from a browser on your network.</p>
           <div class="actions">
             <a class="button primary" href="https://github.com/eMacTh3Creator/Controllarr/releases/download/v2.3.0/Controllarr-v2.3.0-macOS-arm64.zip" download>Download latest</a>
             <a class="button quiet" href="https://github.com/eMacTh3Creator/Controllarr">View on GitHub</a>
@@ -278,15 +278,15 @@
     <section id="features">
       <div class="shell">
         <div class="section-title">
-          <h2>Built for control. Designed for scale.</h2>
-          <p>A focused Mac app for people who want native UI, remote WebUI access, *arr compatibility, VPN-aware torrent traffic, and stability under large libraries.</p>
+          <h2>What Controllarr does</h2>
+          <p>Use your VPN for torrent traffic, organize downloads, and connect your media apps.</p>
         </div>
 
         <div class="feature-rail">
           <article class="feature">
             <div class="icon-orb">VPN</div>
             <div>
-              <h3>VPN-aware routing</h3>
+              <h3>Use your VPN for torrent traffic</h3>
               <p>Bind torrent traffic to the VPN adapter, pause on VPN drops, and keep the WebUI/API listener available for LAN clients when your VPN allows local ingress.</p>
             </div>
             <div class="signal-grid">
@@ -299,8 +299,8 @@
           <article class="feature">
             <div class="icon-orb">qb</div>
             <div>
-              <h3>qBittorrent-compatible API</h3>
-              <p>Point Sonarr, Radarr, and Overseerr at Controllarr using the qBittorrent download-client type. No brittle scraping or custom downloader plugin required.</p>
+              <h3>Connect Sonarr and Radarr</h3>
+              <p>Add Controllarr as a qBittorrent download client in Sonarr or Radarr. Overseerr sends requests through those apps.</p>
             </div>
             <div class="code-card">
 <pre>POST /api/v2/torrents/add
@@ -314,8 +314,8 @@ GET /api/v2/torrents/info</pre>
           <article class="feature">
             <div class="icon-orb">1K</div>
             <div>
-              <h3>Large-library stability</h3>
-              <p>The latest release adds automatic conservative resolver protection for very large libraries so VPN/DNS tracker lookups cannot spike as aggressively.</p>
+              <h3>Manage larger libraries</h3>
+              <p>Controllarr limits how many tracker address lookups run at once when your library gets large.</p>
             </div>
             <div class="signal-grid">
               <div class="signal-card"><strong>1,000+</strong><span>torrent guidance</span></div>
@@ -327,7 +327,7 @@ GET /api/v2/torrents/info</pre>
           <article class="feature">
             <div class="icon-orb">UI</div>
             <div>
-              <h3>Native Mac + modern WebUI</h3>
+              <h3>Manage downloads locally or in a browser</h3>
               <p>Use the SwiftUI window on the Mac, the status item in the menu bar, or the embedded React WebUI from another machine on your network.</p>
             </div>
             <div class="code-card">
@@ -345,7 +345,7 @@ Login:  admin / adminadmin</pre>
         <div class="release-band">
           <div>
             <h2>What's new in the latest release</h2>
-            <p class="lead">v2.3.0 brings bounded checkpointing and archive workers, safer VPN startup, clean import paths, confirmed bulk removal and native iOS remote support.</p>
+            <p class="lead">Version 2.3.0 limits background work, improves VPN startup, fixes import paths, and adds confirmation for bulk removal. It also supports the iOS remote app.</p>
             <div class="actions">
               <a class="button primary" href="https://github.com/eMacTh3Creator/Controllarr/releases/latest">Release notes</a>
               <a class="button quiet" href="https://github.com/eMacTh3Creator/Controllarr/blob/main/docs/PERFORMANCE.md">Performance guide</a>
@@ -354,9 +354,9 @@ Login:  admin / adminadmin</pre>
             </div>
           </div>
           <ul class="release-list">
-            <li><span class="amber">01</span><span><b>Bounded library work.</b> Bulk snapshots, 16 in-flight resume saves and two archive workers reduce unnecessary pressure.</span></li>
-            <li><span class="amber">02</span><span><b>Safer torrent control.</b> Session-level VPN gating, confirmed bulk removal, per-category subfolders and explicit import-folder repair.</span></li>
-            <li><span class="amber">03</span><span><b>One adaptive remote workspace.</b> Remote 1.1 brings native SwiftUI to iPhone, iPad and Mac: compact tabs, a wide-screen sidebar, sortable torrent tables, bulk controls and a file inspector. The Mac download is signed and notarized for Apple Silicon and Intel, macOS 15+. iPhone/iPad build 1.1.0 (3) is in internal TestFlight. See the remote guide for access and notification options.</span></li>
+            <li><span class="amber">01</span><span><b>Background tasks.</b> Saves and archive extraction run in limited batches.</span></li>
+            <li><span class="amber">02</span><span><b>Torrent controls.</b> VPN connection checks, confirmation before bulk removal, separate download folders, and a tool to repair older folder layouts.</span></li>
+            <li><span class="amber">03</span><span><b>Remote app for iPhone, iPad, and Mac.</b> Remote 1.1 lets you sort transfers, manage several torrents at once, and inspect files from your iPhone, iPad, or Mac. The Mac download is signed and notarized for Apple Silicon and Intel, macOS 15+. iPhone/iPad build 1.1.0 (3) is in internal TestFlight. See the remote guide for access and notification options.</span></li>
             <li><span class="amber">04</span><span><b>Platform guide.</b> <a href="https://github.com/eMacTh3Creator/Controllarr/blob/main/docs/PARITY.md">Compare Mac and Windows features.</a></span></li>
           </ul>
         </div>
@@ -366,14 +366,14 @@ Login:  admin / adminadmin</pre>
     <section id="install">
       <div class="shell">
         <div class="section-title">
-          <h2>Get started in minutes.</h2>
-          <p>Download the latest zip, move the app into Applications, and point your *arr apps at the qBittorrent-compatible API.</p>
+          <h2>Install and connect</h2>
+          <p>Download the latest zip, move the app into Applications, and point your *arr apps at the Connect Sonarr and Radarr.</p>
         </div>
         <div class="steps">
           <article class="step">
             <div class="step-num">1</div>
             <h3>Download</h3>
-            <p>Grab the latest <code>Controllarr-v*-macOS-arm64.zip</code> from GitHub Releases.</p>
+            <p>Download the latest <code>Controllarr-v*-macOS-arm64.zip</code> from GitHub Releases.</p>
           </article>
           <article class="step">
             <div class="step-num">2</div>
@@ -400,7 +400,7 @@ Login:  admin / adminadmin</pre>
 
   <footer>
     <div class="shell footer-inner">
-      <div>Controllarr. Take control. Stay private. Keep seeding.</div>
+      <div>Controllarr. </div>
       <div class="footer-links">
         <a href="https://github.com/eMacTh3Creator/Controllarr">GitHub</a>
         <a href="https://github.com/eMacTh3Creator/Controllarr/releases/download/v2.3.0/Controllarr-v2.3.0-macOS-arm64.zip" download>Download</a>
